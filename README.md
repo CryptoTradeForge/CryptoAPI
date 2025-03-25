@@ -122,7 +122,7 @@ This enables easy extension to other exchanges by implementing new classes that 
 Run the test suite to verify functionality:
 
 ```bash
-python test_futures_api.py
+python futures_unittest.py
 ```
 
 The tests include:
