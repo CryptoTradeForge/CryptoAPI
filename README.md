@@ -23,7 +23,7 @@ This project provides a unified API abstraction for interacting with various cry
 
 ```bash
 # Clone the repository
-git clone <repository-url>
+git clone git@github.com:CryptoTradeForge/CryptoAPI.git
 cd CryptoAPI
 
 # Install dependencies
