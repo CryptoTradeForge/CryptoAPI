@@ -62,7 +62,7 @@ class TestFuturesAPI(unittest.TestCase):
             raise
     
     def test_limit_order_workflow(self):
-        """Test order workflow: Get price, place order, query order, cancel order"""
+        """Test limit order workflow: Get price, place limit order, query order, cancel order"""
         side = "BUY"
         amount = 50
         leverage = 5
@@ -120,7 +120,7 @@ class TestFuturesAPI(unittest.TestCase):
             raise
     
     def test_market_order_workflow(self):
-        """Test market order workflow"""
+        """Test market order workflow: Place market order, get positions, close position"""
         side = "SELL"
         amount = 50
         leverage = 5

@@ -21,17 +21,17 @@ class BinanceFutures(AbstractFuturesAPI):
             api_secret=self.binance_api_secret,
         )
 
-    def set_stop_loss_take_profit(self, symbol, side, stop_loss_price=None, take_profit_price=None):
+    def set_stop_loss_take_profit(self, symbol, side, quantity, stop_loss_price=None, take_profit_price=None):
         """設置止損和止盈條件單"""
         symbol = self._modify_symbol_name(symbol)
         try:
-            # 檢查是否有持倉
-            position = self.get_positions(symbol=symbol)
-            if not position or float(position[0]["notional"]) <= 0:
-                print("無持倉，跳過設置止損止盈單。")
-                return
-            else:
-                amount = float(position[0]["notional"])
+            # # 檢查是否有持倉
+            # position = self.get_positions(symbol=symbol)
+            # if not position or float(position[0]["notional"]) <= 0:
+            #     print("無持倉，跳過設置止損止盈單。")
+            #     return
+            # else:
+            #     quantity = float(position[0]["notional"])
             
             # 止損單設置
             if stop_loss_price:
@@ -40,7 +40,7 @@ class BinanceFutures(AbstractFuturesAPI):
                     symbol=symbol,
                     side=stop_side,
                     type="STOP_MARKET",
-                    quantity=amount,
+                    quantity=quantity,
                     stopPrice=stop_loss_price,
                     reduceOnly=True,
                     timeInForce="GTC"
@@ -54,7 +54,7 @@ class BinanceFutures(AbstractFuturesAPI):
                     symbol=symbol,
                     side=tp_side,
                     type="TAKE_PROFIT_MARKET",
-                    quantity=amount,
+                    quantity=quantity,
                     stopPrice=take_profit_price,
                     reduceOnly=True,
                     timeInForce="GTC"
@@ -112,7 +112,7 @@ class BinanceFutures(AbstractFuturesAPI):
             
             print(f"開 {position_type} 倉成功，數量：{quantity}，價格：{price}")
             # 設置止損止盈
-            self.set_stop_loss_take_profit(symbol, side, stop_loss_price, take_profit_price)
+            self.set_stop_loss_take_profit(symbol, side, quantity, stop_loss_price, take_profit_price)
             
         except BinanceAPIException as e:
             raise Exception(f"開 {position_type} 市價單失敗：{e}")
