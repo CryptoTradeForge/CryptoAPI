@@ -6,7 +6,12 @@ from abstract_futures_api import AbstractFuturesAPI
 
 class BinanceFutures(AbstractFuturesAPI):
     def __init__(self, env_path=".env"):
-        """初始化 Binance Futures 交易類別"""
+        """
+        初始化 Binance Futures 交易類別
+        
+        Args:
+            env_path (str, optional): 環境變數文件路徑. 默認值為 ".env"
+        """
         
         self.env_path = env_path
         self.env = load_dotenv(self.env_path)
@@ -15,24 +20,32 @@ class BinanceFutures(AbstractFuturesAPI):
         self._initialize_client()
 
     def _initialize_client(self):
-        """初始化 Binance 客戶端"""
+        """
+        初始化 Binance 客戶端
+        
+        用從環境變數獲取的API key和secret來創建Binance客戶端實例
+        """
         self.client = Client(
             api_key=self.binance_api_key,
             api_secret=self.binance_api_secret,
         )
 
     def set_stop_loss_take_profit(self, symbol, side, quantity, stop_loss_price=None, take_profit_price=None):
-        """設置止損和止盈條件單"""
+        """
+        設置止損和止盈條件單
+        
+        Args:
+            symbol (str): 交易對名稱
+            side (str): 倉位方向 ("BUY"/"SELL" 或 "LONG"/"SHORT")
+            quantity (float): 交易數量
+            stop_loss_price (float, optional): 止損價格
+            take_profit_price (float, optional): 止盈價格
+            
+        Raises:
+            Exception: 設置止損止盈單失敗時拋出異常
+        """
         symbol = self._modify_symbol_name(symbol)
         try:
-            # # 檢查是否有持倉
-            # position = self.get_positions(symbol=symbol)
-            # if not position or float(position[0]["notional"]) <= 0:
-            #     print("無持倉，跳過設置止損止盈單。")
-            #     return
-            # else:
-            #     quantity = float(position[0]["notional"])
-            
             # 止損單設置
             if stop_loss_price:
                 stop_side = "SELL" if side.upper() == "BUY" or side == "LONG" else "BUY"
@@ -70,7 +83,20 @@ class BinanceFutures(AbstractFuturesAPI):
 
 
     def place_market_order(self, symbol, position_type, amount, leverage, stop_loss_price=None, take_profit_price=None):
-        """開倉操作（多頭或空頭）"""
+        """
+        市價開倉交易
+        
+        Args:
+            symbol (str): 交易對名稱
+            position_type (str): 倉位類型 ("LONG"/"SHORT")
+            amount (float): 交易金額 (USDT)
+            leverage (int): 槓桿倍數
+            stop_loss_price (float, optional): 止損價格
+            take_profit_price (float, optional): 止盈價格
+            
+        Raises:
+            Exception: 開倉失敗時拋出異常
+        """
         try:
             symbol = self._modify_symbol_name(symbol)
             side = "BUY" if position_type.upper() == "LONG" or position_type == "BUY" else "SELL"
@@ -119,7 +145,19 @@ class BinanceFutures(AbstractFuturesAPI):
 
 
     def place_limit_order(self, symbol, position_type, amount, price, leverage):
-        """限價開倉"""
+        """
+        限價開倉交易
+        
+        Args:
+            symbol (str): 交易對名稱
+            position_type (str): 倉位類型 ("LONG"/"SHORT")
+            amount (float): 交易金額 (USDT)
+            price (float): 限價
+            leverage (int): 槓桿倍數
+            
+        Raises:
+            Exception: 開倉失敗時拋出異常
+        """
         try:
             # Modify symbol name for API
             symbol = self._modify_symbol_name(symbol)
@@ -170,7 +208,16 @@ class BinanceFutures(AbstractFuturesAPI):
 
 
     def close_position(self, symbol, position_type):
-        """平倉並取消相關止盈止損條件單"""
+        """
+        平倉指定倉位並取消相關止盈止損條件單
+        
+        Args:
+            symbol (str): 交易對名稱
+            position_type (str): 倉位類型 ("LONG"/"SHORT")
+            
+        Raises:
+            Exception: 平倉失敗時拋出異常
+        """
         try:
             symbol = self._modify_symbol_name(symbol)
             position = self.get_positions(symbol=symbol)
@@ -214,7 +261,18 @@ class BinanceFutures(AbstractFuturesAPI):
             raise Exception(f"平 {position_type} 倉失敗：{e}")
     
     def get_positions(self, symbol=None):
-        """獲取指定交易對或全部持倉資訊"""
+        """
+        獲取持倉資訊
+        
+        Args:
+            symbol (str, optional): 交易對名稱，若不指定則獲取所有持倉
+            
+        Returns:
+            list: 持倉資訊列表
+            
+        Raises:
+            Exception: 獲取持倉失敗時拋出異常
+        """
         try:
             positions = self.client.futures_position_information()
             symbol = self._modify_symbol_name(symbol) if symbol else None
@@ -235,7 +293,19 @@ class BinanceFutures(AbstractFuturesAPI):
                 raise Exception(f"獲取所有持倉失敗：{e}")
     
     def get_open_orders(self, symbol=None, type=None):
-        """獲取指定交易對或全部的訂單"""
+        """
+        獲取未成交訂單
+        
+        Args:
+            symbol (str, optional): 交易對名稱
+            type (str, optional): 訂單類型
+            
+        Returns:
+            list: 訂單列表
+            
+        Raises:
+            Exception: 獲取訂單失敗時拋出異常
+        """
         try:
             if (symbol):
                 symbol = self._modify_symbol_name(symbol)
@@ -257,7 +327,21 @@ class BinanceFutures(AbstractFuturesAPI):
                 raise Exception(f"獲取所有訂單失敗：{e}")
     
     def fetch_usdt_balance(self):
-        """獲取帳戶餘額資訊"""
+        """
+        獲取USDT餘額
+        
+        Returns:
+            dict: 包含可用餘額、已用餘額和總餘額的字典
+            {
+                "free": float, # 可用餘額
+                "used": float, # 已用餘額
+                "total": float # 總餘額
+            }
+            
+        Raises:
+            ValueError: USDT資產不存在時拋出
+            BinanceAPIException: API調用失敗時捕獲
+        """
         try:
             account_info = self.client.futures_account()
             for asset in account_info["assets"]:
@@ -276,7 +360,18 @@ class BinanceFutures(AbstractFuturesAPI):
             return None
 
     def get_price(self, symbol):
-        """獲取指定交易對的最新價格"""
+        """
+        獲取當前價格
+        
+        Args:
+            symbol (str): 交易對名稱
+            
+        Returns:
+            float: 當前價格
+            
+        Raises:
+            Exception: 獲取價格失敗時拋出異常
+        """
         try:
             symbol = self._modify_symbol_name(symbol)
             ticker = self.client.futures_symbol_ticker(symbol=symbol)
@@ -288,7 +383,16 @@ class BinanceFutures(AbstractFuturesAPI):
     
     
     def cancel_order(self, symbol, type=None):
-        """取消指定交易對的訂單"""
+        """
+        取消訂單
+        
+        Args:
+            symbol (str): 交易對名稱
+            type (str, optional): 訂單類型
+            
+        Raises:
+            Exception: 取消訂單失敗時拋出異常
+        """
         try:
             symbol = self._modify_symbol_name(symbol)
             orders = self.get_open_orders(symbol=symbol, type=type)
@@ -301,7 +405,21 @@ class BinanceFutures(AbstractFuturesAPI):
             raise Exception(f"取消 {symbol} 訂單失敗：{e}")
     
     def get_historical_data(self, symbol, interval, limit, closed=True):
-        """獲取歷史數據"""
+        """
+        獲取歷史K線數據
+        
+        Args:
+            symbol (str): 交易對名稱
+            interval (str): 時間間隔，如 "1m", "5m", "1h", "1d" 等
+            limit (int): 數量限制
+            closed (bool, optional): 是否只獲取已關閉的K線。默認為True
+            
+        Returns:
+            list: K線數據列表
+            
+        Raises:
+            Exception: 獲取歷史數據失敗時拋出異常
+        """
         symbol = self._modify_symbol_name(symbol)
         try:
             if closed:
@@ -317,7 +435,15 @@ class BinanceFutures(AbstractFuturesAPI):
     
     # 輔助方法 --------------------------------------------------
     def _cancel_related_orders(self, symbol):
-        """取消 symbol 的所有止損和止盈訂單"""
+        """
+        取消 symbol 的所有止損和止盈訂單
+        
+        Args:
+            symbol (str): 交易對名稱
+            
+        Raises:
+            BinanceAPIException: 取消訂單失敗時捕獲但不拋出
+        """
         try:
             symbol = self._modify_symbol_name(symbol)
             for order in self.get_open_orders(symbol=symbol) or []:
@@ -328,11 +454,27 @@ class BinanceFutures(AbstractFuturesAPI):
             print(f"取消 {symbol} 訂單失敗：{e}")
 
     def _modify_symbol_name(self, symbol):
-        """將交易對名稱轉換為 Binance API 支援的格式"""
+        """
+        將交易對名稱轉換為 Binance API 支援的格式
+        
+        Args:
+            symbol (str): 原始交易對名稱
+            
+        Returns:
+            str: 轉換後的交易對名稱
+        """
         return symbol.replace("/", "").upper()
 
     def _get_precision_from_step(self, step_str):
-        """從 step_str 中獲取精度"""
+        """
+        從 step_str 中獲取精度
+        
+        Args:
+            step_str (str): 步長字符串
+            
+        Returns:
+            int: 精度值
+        """
         step_str = str(float(step_str))
         if '.' not in step_str:
             return 0
