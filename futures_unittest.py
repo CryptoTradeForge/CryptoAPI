@@ -83,7 +83,7 @@ class TestFuturesAPI(unittest.TestCase):
             
             # 3. Place limit order
             logger.info("📝 Placing limit order")
-            self.future_client.place_limit_order(self.SYMBOL, side, amount, limit_price, leverage)
+            self.future_client.place_limit_order(self.SYMBOL, side, limit_price, leverage, amount)
             logger.info(f"Limit order placed: {side} {amount} {self.SYMBOL} @ {limit_price}")
             
             # 4. Get open orders
@@ -133,7 +133,7 @@ class TestFuturesAPI(unittest.TestCase):
             
             # 1. Place market order
             logger.info("📝 Placing market order")
-            self.future_client.place_market_order(self.SYMBOL, side, amount, leverage, stop_loss_price, take_profit_price)
+            self.future_client.place_market_order(self.SYMBOL, side, leverage, amount, stop_loss_price, take_profit_price)
             logger.info(f"Market order placed: {side} {amount} {self.SYMBOL}")
             
             # 2. Check positions
