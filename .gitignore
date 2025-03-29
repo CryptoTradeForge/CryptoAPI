@@ -176,3 +176,4 @@ cython_debug/
 
 
 *.ipynb
+*limit_sltp_rec.json
