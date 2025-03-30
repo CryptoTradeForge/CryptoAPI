@@ -1,8 +1,9 @@
 import os
+import time
 from dotenv import load_dotenv
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
-from abstract_futures_api import AbstractFuturesAPI
+from futures.base import AbstractFuturesAPI
 from typing import Optional, List, Dict, Union, Any, Tuple
 
 class BinanceFutures(AbstractFuturesAPI):
@@ -30,6 +31,7 @@ class BinanceFutures(AbstractFuturesAPI):
             api_key=self.binance_api_key,
             api_secret=self.binance_api_secret,
         )
+        self.client.synced = True
 
     def set_stop_loss_take_profit(self, symbol: str, side: str, quantity: float, 
                                 stop_loss_price: Optional[float] = None, 
@@ -123,6 +125,7 @@ class BinanceFutures(AbstractFuturesAPI):
             quantity = float('{:.{}f}'.format(quantity, quantity_precision))
             price = float('{:.{}f}'.format(price, price_precision))
             
+            
             # 設定槓桿
             self.client.futures_change_leverage(symbol=symbol, leverage=leverage)
             
@@ -188,6 +191,7 @@ class BinanceFutures(AbstractFuturesAPI):
             quantity = float('{:.{}f}'.format(quantity, quantity_precision))
             price = float('{:.{}f}'.format(price, price_precision))
             
+            
             # Set leverage
             self.client.futures_change_leverage(symbol=symbol, leverage=leverage)
             
@@ -247,6 +251,7 @@ class BinanceFutures(AbstractFuturesAPI):
             # Round quantity and price to the correct precision
             quantity = float('{:.{}f}'.format(quantity, quantity_precision))
             
+            
             # 執行平倉
             side = "SELL" if (position_type == "long" or position_type == "BUY") else "BUY"
             self.client.futures_create_order(
@@ -279,6 +284,7 @@ class BinanceFutures(AbstractFuturesAPI):
             Exception: 獲取持倉失敗時拋出異常
         """
         try:
+            
             positions = self.client.futures_position_information()
             symbol = self._modify_symbol_name(symbol) if symbol else None
             
@@ -312,6 +318,7 @@ class BinanceFutures(AbstractFuturesAPI):
             Exception: 獲取訂單失敗時拋出異常
         """
         try:
+            
             if (symbol):
                 symbol = self._modify_symbol_name(symbol)
                 orders = self.client.futures_get_open_orders(symbol=symbol)
@@ -348,6 +355,7 @@ class BinanceFutures(AbstractFuturesAPI):
             BinanceAPIException: API調用失敗時捕獲
         """
         try:
+            
             account_info = self.client.futures_account()
             for asset in account_info["assets"]:
                 if (asset["asset"] == "USDT"):
@@ -378,6 +386,7 @@ class BinanceFutures(AbstractFuturesAPI):
             Exception: 獲取價格失敗時拋出異常
         """
         try:
+            
             symbol = self._modify_symbol_name(symbol)
             ticker = self.client.futures_symbol_ticker(symbol=symbol)
             return float(ticker["price"])
@@ -401,6 +410,7 @@ class BinanceFutures(AbstractFuturesAPI):
         try:
             symbol = self._modify_symbol_name(symbol)
             orders = self.get_open_orders(symbol=symbol, type=type)
+            
             
             for order in orders:
                 self.client.futures_cancel_order(symbol=symbol, orderId=order["orderId"])
