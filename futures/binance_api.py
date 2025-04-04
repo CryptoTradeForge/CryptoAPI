@@ -1,10 +1,10 @@
 import os
-import time
 from dotenv import load_dotenv
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
-from futures.base import AbstractFuturesAPI
 from typing import Optional, List, Dict, Union, Any, Tuple
+
+from .base import AbstractFuturesAPI
 
 class BinanceFutures(AbstractFuturesAPI):
     def __init__(self, env_path: str = ".env"):
