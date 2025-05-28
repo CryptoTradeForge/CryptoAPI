@@ -270,6 +270,29 @@ class BinanceFutures(AbstractFuturesAPI):
         except BinanceAPIException as e:
             raise Exception(f"平 {position_type} 倉失敗：{e}")
     
+    def cancel_order(self, symbol: str, type: Optional[str] = None) -> None:
+        """
+        取消訂單
+        
+        Args:
+            symbol (str): 交易對名稱
+            type (str, optional): 訂單類型
+            
+        Raises:
+            Exception: 取消訂單失敗時拋出異常
+        """
+        try:
+            symbol = self._modify_symbol_name(symbol)
+            orders = self.get_open_orders(symbol=symbol, type=type)
+            
+            
+            for order in orders:
+                self.client.futures_cancel_order(symbol=symbol, orderId=order["orderId"])
+                print(f"取消 {symbol} {type} 訂單成功： {order['orderId']}")
+        
+        except BinanceAPIException as e:
+            raise Exception(f"取消 {symbol} 訂單失敗：{e}")
+    
     def get_positions(self, symbol: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         獲取持倉資訊
@@ -395,29 +418,6 @@ class BinanceFutures(AbstractFuturesAPI):
             raise Exception(f"獲取 {symbol} 價格失敗：{e}")
 
     
-    
-    def cancel_order(self, symbol: str, type: Optional[str] = None) -> None:
-        """
-        取消訂單
-        
-        Args:
-            symbol (str): 交易對名稱
-            type (str, optional): 訂單類型
-            
-        Raises:
-            Exception: 取消訂單失敗時拋出異常
-        """
-        try:
-            symbol = self._modify_symbol_name(symbol)
-            orders = self.get_open_orders(symbol=symbol, type=type)
-            
-            
-            for order in orders:
-                self.client.futures_cancel_order(symbol=symbol, orderId=order["orderId"])
-                print(f"取消 {symbol} {type} 訂單成功： {order['orderId']}")
-        
-        except BinanceAPIException as e:
-            raise Exception(f"取消 {symbol} 訂單失敗：{e}")
     
     def get_historical_data(self, symbol: str, interval: str, limit: int, closed: bool = True) -> List[List[Any]]:
         """

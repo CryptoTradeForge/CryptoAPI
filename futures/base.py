@@ -66,6 +66,17 @@ class AbstractFuturesAPI(ABC):
         pass
     
     @abstractmethod
+    def cancel_order(self, symbol: str, type: Optional[str] = None) -> None:
+        """
+        取消訂單
+        
+        Args:
+            symbol (str): 交易對名稱
+            type (str, optional): 訂單類型
+        """
+        pass
+    
+    @abstractmethod
     def get_positions(self, symbol: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         獲取持倉資訊
@@ -109,17 +120,6 @@ class AbstractFuturesAPI(ABC):
             symbol (str): 交易對名稱
         Returns:
             float: 當前價格
-        """
-        pass
-    
-    @abstractmethod
-    def cancel_order(self, symbol: str, type: Optional[str] = None) -> None:
-        """
-        取消訂單
-        
-        Args:
-            symbol (str): 交易對名稱
-            type (str, optional): 訂單類型
         """
         pass
     
