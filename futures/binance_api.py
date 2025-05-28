@@ -440,7 +440,7 @@ class BinanceFutures(AbstractFuturesAPI):
             if (closed):
                 limit += 1
             
-            klines = self.client.futures_klines(symbol=symbol, interval=interval, limit=limit)
+            klines = self.client.get_historical_klines(symbol=symbol, interval=interval, limit=limit)
             if (closed):
                 klines = klines[:-1]  # 去除當前 K 線
             return klines
