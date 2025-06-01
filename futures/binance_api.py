@@ -466,21 +466,22 @@ class BinanceFutures(AbstractFuturesAPI):
                 
                 all_klines = klines + all_klines
                 remaining -= fetch_limit
-                if show:
-                    print(f"Fetched {len(klines)} OHLCV data for {symbol}, remaining: {remaining}")
                 
                 if len(set([x[0] for x in all_klines])) != len(all_klines):
                     print("Duplicate timestamps found, stopping fetch.")
                     raise Exception("Duplicate timestamp found")
+                
+                if show:
+                    print(f"Fetched {len(all_klines)} OHLCV data for {symbol}, remaining: {remaining}")
             
             if not all_klines or len(all_klines) < limit:
                 print(f"獲取 {symbol} 歷史數據失敗，數據不足：{len(all_klines)} < {limit}")
                 raise Exception(f"獲取 {symbol} 歷史數據失敗，數據不足：{len(all_klines)} < {limit}")
             
             if (closed):
-                klines = klines[:-1]  # 去除當前 K 線
+                all_klines = all_klines[:-1]  # 去除當前 K 線
             
-            return klines
+            return all_klines
         
         except BinanceAPIException as e:
             raise Exception(f"獲取 {symbol} 歷史數據失敗：{e}")
