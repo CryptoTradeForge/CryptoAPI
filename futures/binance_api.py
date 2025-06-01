@@ -419,7 +419,7 @@ class BinanceFutures(AbstractFuturesAPI):
 
     
     
-    def get_historical_data(self, symbol: str, interval: str, limit: int, closed: bool = True) -> List[List[Any]]:
+    def get_historical_data(self, symbol: str, interval: str, limit: int, closed: bool = True, show=False) -> List[List[Any]]:
         """
         獲取歷史K線數據
         
@@ -428,6 +428,7 @@ class BinanceFutures(AbstractFuturesAPI):
             interval (str): 時間間隔，如 "1m", "5m", "1h", "1d" 等
             limit (int): 數量限制
             closed (bool, optional): 是否只獲取已關閉的K線。默認為True
+            show (bool, optional): 是否顯示獲取進度。默認為False
             
         Returns:
             list: K線數據列表
@@ -436,13 +437,49 @@ class BinanceFutures(AbstractFuturesAPI):
             Exception: 獲取歷史數據失敗時拋出異常
         """
         symbol = self._modify_symbol_name(symbol)
+        max_limit = 1000  # Binance API 單次請求上限
+        all_klines = []
+        
         try:
             if (closed):
                 limit += 1
             
-            klines = self.client.get_historical_klines(symbol=symbol, interval=interval, limit=limit)
+            remaining = limit
+            
+            while remaining > 0:
+                
+                if show:
+                    print(f"Fetching {remaining} OHLCV data for {symbol}...")
+                
+                fetch_limit = min(max_limit, remaining)
+                
+                if all_klines:
+                    time_diff = all_klines[1][0] - all_klines[0][0]
+                    since = all_klines[0][0] - time_diff * fetch_limit
+                    
+                    klines = self.client.get_historical_klines(symbol=symbol, interval=interval, limit=fetch_limit, start_str=since)
+                else:
+                    klines = self.client.get_historical_klines(symbol=symbol, interval=interval, limit=fetch_limit)
+            
+                if not klines:
+                    break
+                
+                all_klines = klines + all_klines
+                remaining -= fetch_limit
+                if show:
+                    print(f"Fetched {len(klines)} OHLCV data for {symbol}, remaining: {remaining}")
+                
+                if len(set([x[0] for x in all_klines])) != len(all_klines):
+                    print("Duplicate timestamps found, stopping fetch.")
+                    raise Exception("Duplicate timestamp found")
+            
+            if not all_klines or len(all_klines) < limit:
+                print(f"獲取 {symbol} 歷史數據失敗，數據不足：{len(all_klines)} < {limit}")
+                raise Exception(f"獲取 {symbol} 歷史數據失敗，數據不足：{len(all_klines)} < {limit}")
+            
             if (closed):
                 klines = klines[:-1]  # 去除當前 K 線
+            
             return klines
         
         except BinanceAPIException as e:
