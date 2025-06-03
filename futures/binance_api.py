@@ -51,8 +51,18 @@ class BinanceFutures(AbstractFuturesAPI):
         """
         symbol = self._modify_symbol_name(symbol)
         try:
+            
+            # Get symbol info to handle precision and step sizes
+            price_precision, quantity_precision = self._get_symbol_precision(symbol)
+            
             # 止損單設置
             if stop_loss_price:
+                
+                # Round stop loss price and quantity to the correct precision
+                stop_loss_price = float('{:.{}f}'.format(stop_loss_price, price_precision))
+                quantity = float('{:.{}f}'.format(quantity, quantity_precision))
+                
+                # Determine the side for stop loss order
                 stop_side = "SELL" if side.upper() == "BUY" or side == "LONG" else "BUY"
                 self.client.futures_create_order(
                     symbol=symbol,
@@ -67,6 +77,12 @@ class BinanceFutures(AbstractFuturesAPI):
                 
             # 止盈單設置
             if take_profit_price:
+                
+                # Round take profit price and quantity to the correct precision
+                take_profit_price = float('{:.{}f}'.format(take_profit_price, price_precision))
+                quantity = float('{:.{}f}'.format(quantity, quantity_precision))
+                
+                # Determine the side for take profit order
                 tp_side = "SELL" if side.upper() == "BUY" or side == "LONG" else "BUY"
                 self.client.futures_create_order(
                     symbol=symbol,
@@ -111,20 +127,11 @@ class BinanceFutures(AbstractFuturesAPI):
             quantity = amount / price
             
             # Get symbol info to handle precision and step sizes
-            symbol_info = self.client.get_symbol_info(symbol)
-            filters = symbol_info["filters"]
-            
-            # Get precision for quantity (LOT_SIZE) and price (PRICE_FILTER)
-            tick_size = next(filter for filter in filters if filter['filterType'] == 'PRICE_FILTER')['tickSize']
-            step_size = next(filter for filter in filters if filter['filterType'] == 'LOT_SIZE')['stepSize']
-            
-            price_precision = self._get_precision_from_step(tick_size)
-            quantity_precision = self._get_precision_from_step(step_size)
+            price_precision, quantity_precision = self._get_symbol_precision(symbol)
             
             # Round quantity and price to the correct precision
             quantity = float('{:.{}f}'.format(quantity, quantity_precision))
             price = float('{:.{}f}'.format(price, price_precision))
-            
             
             # 設定槓桿
             self.client.futures_change_leverage(symbol=symbol, leverage=leverage)
@@ -177,20 +184,11 @@ class BinanceFutures(AbstractFuturesAPI):
             quantity = amount / price
             
             # Get symbol info to handle precision and step sizes
-            symbol_info = self.client.get_symbol_info(symbol)
-            filters = symbol_info["filters"]
-            
-            # Get precision for quantity (LOT_SIZE) and price (PRICE_FILTER)
-            tick_size = next(filter for filter in filters if filter['filterType'] == 'PRICE_FILTER')['tickSize']
-            step_size = next(filter for filter in filters if filter['filterType'] == 'LOT_SIZE')['stepSize']
-            
-            price_precision = self._get_precision_from_step(tick_size)
-            quantity_precision = self._get_precision_from_step(step_size)
+            price_precision, quantity_precision = self._get_symbol_precision(symbol)
             
             # Round quantity and price to the correct precision
             quantity = float('{:.{}f}'.format(quantity, quantity_precision))
             price = float('{:.{}f}'.format(price, price_precision))
-            
             
             # Set leverage
             self.client.futures_change_leverage(symbol=symbol, leverage=leverage)
@@ -535,3 +533,24 @@ class BinanceFutures(AbstractFuturesAPI):
         if (decimal_part.replace('0', '') == '1'):
             return decimal_part.find('1')
         return 0
+
+    def _get_symbol_precision(self, symbol: str) -> Tuple[int, int]:
+        """
+        獲取交易對的價格和數量精度
+        
+        Args:
+            symbol (str): 交易對名稱
+            
+        Returns:
+            tuple: (價格精度, 數量精度)
+        """
+        symbol_info = self.client.get_symbol_info(symbol)
+        filters = symbol_info["filters"]
+        
+        tick_size = next(filter for filter in filters if filter['filterType'] == 'PRICE_FILTER')['tickSize']
+        step_size = next(filter for filter in filters if filter['filterType'] == 'LOT_SIZE')['stepSize']
+        
+        price_precision = self._get_precision_from_step(tick_size)
+        quantity_precision = self._get_precision_from_step(step_size)
+        
+        return price_precision, quantity_precision
