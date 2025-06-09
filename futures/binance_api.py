@@ -484,6 +484,21 @@ class BinanceFutures(AbstractFuturesAPI):
         except BinanceAPIException as e:
             raise Exception(f"獲取 {symbol} 歷史數據失敗：{e}")
     
+    
+    def clean_orphan_orders(self) -> None:
+        """
+        清理多餘訂單 (已觸發止損或止盈反向訂單可能會被留下)
+        """
+        
+        for order in self.get_open_orders():
+            symbol = order['info']['symbol']
+            # 要排除 限價單
+            if order['type'] == 'limit':
+                continue
+            if not self.get_positions(symbol=symbol):
+                self._cancel_related_orders(symbol)
+    
+    
     # 輔助方法 --------------------------------------------------
     def _cancel_related_orders(self, symbol: str) -> None:
         """

@@ -23,7 +23,7 @@ class CoinMarketCapAPI:
             self.stable_coins = exclusion_data.get("stable_coins", [])
             self.problematic_coins = exclusion_data.get("problematic_coins", [])
 
-    def get_top_cryptos(self, limit=None, exclude_stablecoins=True, filling=True):
+    def get_top_cryptos(self, limit=None, exclude_stablecoins=True, filling=False):
         """Fetch top cryptocurrencies from CoinMarketCap."""
         url = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/listings/latest"
         headers = {"X-CMC_PRO_API_KEY": self.CMC_API_KEY}
