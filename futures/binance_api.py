@@ -505,7 +505,7 @@ class BinanceFutures(AbstractFuturesAPI):
         """
         
         for order in self.get_open_orders():
-            symbol = order['info']['symbol']
+            symbol = order['symbol']
             # 要排除 限價單
             if order['type'] == 'limit':
                 continue
