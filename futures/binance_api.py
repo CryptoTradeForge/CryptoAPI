@@ -549,9 +549,12 @@ class BinanceFutures(AbstractFuturesAPI):
             int: 精度值（幾位小數）
         """
         d = Decimal(step_str)
-        if d == d.to_integral():
+        d_normalized = d.normalize() 
+        
+        if d_normalized == d_normalized.to_integral():
             return 0  # 是整數，不需要精度
-        return abs(d.as_tuple().exponent)
+        
+        return abs(d_normalized.as_tuple().exponent)
 
     @staticmethod
     def _truncate_to_precision(value: float, precision: int) -> str:
