@@ -1,5 +1,6 @@
 import os
 from dotenv import load_dotenv
+from decimal import Decimal
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
 from binance.enums import HistoricalKlinesType
@@ -545,23 +546,21 @@ class BinanceFutures(AbstractFuturesAPI):
         """
         return symbol.replace("/", "").upper()
 
-    def _get_precision_from_step(self, step_str: str) -> int:
+    @staticmethod
+    def _get_precision_from_step(step_str: str) -> int:
         """
-        從 step_str 中獲取精度
+        從 tick_size 或 step_size 中獲取精度（有效的小數位數）
         
         Args:
-            step_str (str): 步長字符串
+            step_str (str): 如 "0.00001000" 或 "1.00000000"
             
         Returns:
-            int: 精度值
+            int: 精度值（幾位小數）
         """
-        step_str = str(float(step_str))
-        if ('.' not in step_str):
-            return 0
-        decimal_part = step_str.split('.')[1]
-        if (decimal_part.replace('0', '') == '1'):
-            return decimal_part.find('1')
-        return 0
+        d = Decimal(step_str)
+        if d == d.to_integral():
+            return 0  # 是整數，不需要精度
+        return abs(d.as_tuple().exponent)
 
     def _get_symbol_precision(self, symbol: str) -> Tuple[int, int]:
         """
