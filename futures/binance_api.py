@@ -1,6 +1,6 @@
 import os
 from dotenv import load_dotenv
-from decimal import Decimal
+from decimal import Decimal, ROUND_DOWN
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
 from binance.enums import HistoricalKlinesType
@@ -61,10 +61,8 @@ class BinanceFutures(AbstractFuturesAPI):
             if stop_loss_price:
                 
                 # Round stop loss price and quantity to the correct precision
-                # stop_loss_price = float('{:.{}f}'.format(stop_loss_price, price_precision))
-                # quantity = float('{:.{}f}'.format(quantity, quantity_precision))
-                stop_loss_price = round(stop_loss_price, price_precision)
-                quantity = round(quantity, quantity_precision)
+                stop_loss_price = self._truncate_to_precision(stop_loss_price, price_precision)
+                quantity = self._truncate_to_precision(quantity, quantity_precision)
                 
                 # Determine the side for stop loss order
                 stop_side = "SELL" if side.upper() == "BUY" or side == "LONG" else "BUY"
@@ -83,10 +81,8 @@ class BinanceFutures(AbstractFuturesAPI):
             if take_profit_price:
                 
                 # Round take profit price and quantity to the correct precision
-                # take_profit_price = float('{:.{}f}'.format(take_profit_price, price_precision))
-                # quantity = float('{:.{}f}'.format(quantity, quantity_precision))
-                take_profit_price = round(take_profit_price, price_precision)
-                quantity = round(quantity, quantity_precision)
+                take_profit_price = self._truncate_to_precision(take_profit_price, price_precision)
+                quantity = self._truncate_to_precision(quantity, quantity_precision)
                 
                 # Determine the side for take profit order
                 tp_side = "SELL" if side.upper() == "BUY" or side == "LONG" else "BUY"
@@ -136,10 +132,8 @@ class BinanceFutures(AbstractFuturesAPI):
             price_precision, quantity_precision = self._get_symbol_precision(symbol)
             
             # Round quantity and price to the correct precision
-            # quantity = float('{:.{}f}'.format(quantity, quantity_precision))
-            # price = float('{:.{}f}'.format(price, price_precision))
-            quantity = round(quantity, quantity_precision)
-            price = round(price, price_precision)
+            quantity = self._truncate_to_precision(quantity, quantity_precision)
+            price = self._truncate_to_precision(price, price_precision)
             
             
             # 設定槓桿
@@ -196,10 +190,8 @@ class BinanceFutures(AbstractFuturesAPI):
             price_precision, quantity_precision = self._get_symbol_precision(symbol)
             
             # Round quantity and price to the correct precision
-            # quantity = float('{:.{}f}'.format(quantity, quantity_precision))
-            # price = float('{:.{}f}'.format(price, price_precision))
-            quantity = round(quantity, quantity_precision)
-            price = round(price, price_precision)
+            quantity = self._truncate_to_precision(quantity, quantity_precision)
+            price = self._truncate_to_precision(price, price_precision)
             
             # Set leverage
             self.client.futures_change_leverage(symbol=symbol, leverage=leverage)
@@ -258,8 +250,7 @@ class BinanceFutures(AbstractFuturesAPI):
             quantity_precision = self._get_precision_from_step(step_size)
             
             # Round quantity and price to the correct precision
-            # quantity = float('{:.{}f}'.format(quantity, quantity_precision))
-            quantity = round(quantity, quantity_precision)
+            quantity = self._truncate_to_precision(quantity, quantity_precision)
             
             
             # 執行平倉
@@ -561,6 +552,14 @@ class BinanceFutures(AbstractFuturesAPI):
         if d == d.to_integral():
             return 0  # 是整數，不需要精度
         return abs(d.as_tuple().exponent)
+
+    @staticmethod
+    def _truncate_to_precision(value: float, precision: int) -> str:
+        """
+        把浮點數 value 截斷到指定精度，並轉成字串，避免 Binance 報錯。
+        """
+        format_str = '1.' + '0' * precision  # e.g., '1.00000'
+        return str(Decimal(str(value)).quantize(Decimal(format_str), rounding=ROUND_DOWN))
 
     def _get_symbol_precision(self, symbol: str) -> Tuple[int, int]:
         """
