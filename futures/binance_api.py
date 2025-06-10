@@ -2,6 +2,7 @@ import os
 from dotenv import load_dotenv
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
+from binance.enums import HistoricalKlinesType
 from typing import Optional, List, Dict, Union, Any, Tuple
 
 from .base import AbstractFuturesAPI
@@ -59,8 +60,10 @@ class BinanceFutures(AbstractFuturesAPI):
             if stop_loss_price:
                 
                 # Round stop loss price and quantity to the correct precision
-                stop_loss_price = float('{:.{}f}'.format(stop_loss_price, price_precision))
-                quantity = float('{:.{}f}'.format(quantity, quantity_precision))
+                # stop_loss_price = float('{:.{}f}'.format(stop_loss_price, price_precision))
+                # quantity = float('{:.{}f}'.format(quantity, quantity_precision))
+                stop_loss_price = round(stop_loss_price, price_precision)
+                quantity = round(quantity, quantity_precision)
                 
                 # Determine the side for stop loss order
                 stop_side = "SELL" if side.upper() == "BUY" or side == "LONG" else "BUY"
@@ -79,8 +82,10 @@ class BinanceFutures(AbstractFuturesAPI):
             if take_profit_price:
                 
                 # Round take profit price and quantity to the correct precision
-                take_profit_price = float('{:.{}f}'.format(take_profit_price, price_precision))
-                quantity = float('{:.{}f}'.format(quantity, quantity_precision))
+                # take_profit_price = float('{:.{}f}'.format(take_profit_price, price_precision))
+                # quantity = float('{:.{}f}'.format(quantity, quantity_precision))
+                take_profit_price = round(take_profit_price, price_precision)
+                quantity = round(quantity, quantity_precision)
                 
                 # Determine the side for take profit order
                 tp_side = "SELL" if side.upper() == "BUY" or side == "LONG" else "BUY"
@@ -130,8 +135,11 @@ class BinanceFutures(AbstractFuturesAPI):
             price_precision, quantity_precision = self._get_symbol_precision(symbol)
             
             # Round quantity and price to the correct precision
-            quantity = float('{:.{}f}'.format(quantity, quantity_precision))
-            price = float('{:.{}f}'.format(price, price_precision))
+            # quantity = float('{:.{}f}'.format(quantity, quantity_precision))
+            # price = float('{:.{}f}'.format(price, price_precision))
+            quantity = round(quantity, quantity_precision)
+            price = round(price, price_precision)
+            
             
             # 設定槓桿
             self.client.futures_change_leverage(symbol=symbol, leverage=leverage)
@@ -187,8 +195,10 @@ class BinanceFutures(AbstractFuturesAPI):
             price_precision, quantity_precision = self._get_symbol_precision(symbol)
             
             # Round quantity and price to the correct precision
-            quantity = float('{:.{}f}'.format(quantity, quantity_precision))
-            price = float('{:.{}f}'.format(price, price_precision))
+            # quantity = float('{:.{}f}'.format(quantity, quantity_precision))
+            # price = float('{:.{}f}'.format(price, price_precision))
+            quantity = round(quantity, quantity_precision)
+            price = round(price, price_precision)
             
             # Set leverage
             self.client.futures_change_leverage(symbol=symbol, leverage=leverage)
@@ -247,7 +257,8 @@ class BinanceFutures(AbstractFuturesAPI):
             quantity_precision = self._get_precision_from_step(step_size)
             
             # Round quantity and price to the correct precision
-            quantity = float('{:.{}f}'.format(quantity, quantity_precision))
+            # quantity = float('{:.{}f}'.format(quantity, quantity_precision))
+            quantity = round(quantity, quantity_precision)
             
             
             # 執行平倉
@@ -438,6 +449,9 @@ class BinanceFutures(AbstractFuturesAPI):
         max_limit = 1000  # Binance API 單次請求上限
         all_klines = []
         
+        if not self._check_symbol_availability(symbol):
+            raise Exception(f"{symbol} 不是有效的永續合約")
+        
         try:
             if (closed):
                 limit += 1
@@ -455,9 +469,9 @@ class BinanceFutures(AbstractFuturesAPI):
                     time_diff = all_klines[1][0] - all_klines[0][0]
                     since = all_klines[0][0] - time_diff * fetch_limit
                     
-                    klines = self.client.get_historical_klines(symbol=symbol, interval=interval, limit=fetch_limit, start_str=since)
+                    klines = self.client.get_historical_klines(symbol=symbol, interval=interval, limit=fetch_limit, start_str=since, klines_type=HistoricalKlinesType.FUTURES)
                 else:
-                    klines = self.client.get_historical_klines(symbol=symbol, interval=interval, limit=fetch_limit)
+                    klines = self.client.get_historical_klines(symbol=symbol, interval=interval, limit=fetch_limit, klines_type=HistoricalKlinesType.FUTURES)
             
                 if not klines:
                     break
@@ -569,3 +583,19 @@ class BinanceFutures(AbstractFuturesAPI):
         quantity_precision = self._get_precision_from_step(step_size)
         
         return price_precision, quantity_precision
+    
+    def _check_symbol_availability(self, symbol: str) -> bool:
+        """
+        檢查交易對是否為有效的永續合約
+        Args:
+            symbol (str): 交易對名稱
+        Returns:
+            bool: 如果是有效的永續合約則返回 True，否則返回 False
+        """
+        info = self.client.futures_exchange_info()
+        valid_futures = {
+            sym['symbol']
+            for sym in info['symbols']
+            if sym['contractType'] == 'PERPETUAL' and sym['status'] == 'TRADING'
+        }
+        return symbol in valid_futures
