@@ -90,7 +90,7 @@ class BinanceFutures(AbstractFuturesAPI):
                     symbol=symbol,
                     side=tp_side,
                     type="TAKE_PROFIT_MARKET",
-                    quantity=quantity,
+                    quantity=str(quantity),
                     stopPrice=take_profit_price,
                     reduceOnly=True,
                     timeInForce="GTC"
@@ -552,7 +552,7 @@ class BinanceFutures(AbstractFuturesAPI):
         d_normalized = d.normalize() 
         
         if d_normalized == d_normalized.to_integral():
-            return 0  # 是整數，不需要精度
+            return 0 # 是整數，不需要精度
         
         return abs(d_normalized.as_tuple().exponent)
 
@@ -574,11 +574,17 @@ class BinanceFutures(AbstractFuturesAPI):
         Returns:
             tuple: (價格精度, 數量精度)
         """
-        symbol_info = self.client.get_symbol_info(symbol)
+        
+        all_symbols_info = self.client.futures_exchange_info()["symbols"]
+        symbol_info = next((s for s in all_symbols_info if s['symbol'] == symbol), None)
+        
+        if not symbol_info:
+            raise ValueError(f"{symbol} 不存在或不是有效的永續合約")
+        
         filters = symbol_info["filters"]
         
-        tick_size = next(filter for filter in filters if filter['filterType'] == 'PRICE_FILTER')['tickSize']
-        step_size = next(filter for filter in filters if filter['filterType'] == 'LOT_SIZE')['stepSize']
+        tick_size = next((f['tickSize'] for f in filters if f['filterType'] == 'PRICE_FILTER'), None)
+        step_size = next((f['stepSize'] for f in filters if f['filterType'] == 'LOT_SIZE'), None)
         
         price_precision = self._get_precision_from_step(tick_size)
         quantity_precision = self._get_precision_from_step(step_size)
