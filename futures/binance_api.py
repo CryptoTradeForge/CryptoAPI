@@ -1,5 +1,6 @@
 import os
 from dotenv import load_dotenv
+import time
 from decimal import Decimal, ROUND_DOWN
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
@@ -419,74 +420,127 @@ class BinanceFutures(AbstractFuturesAPI):
             raise Exception(f"獲取 {symbol} 價格失敗：{e}")
 
     
-    
-    def get_historical_data(self, symbol: str, interval: str, limit: int, closed: bool = True, show=False) -> List[List[Any]]:
+    def get_historical_data(
+            self,
+            symbol: str,
+            interval: str,
+            limit: Optional[int] = None,
+            since: Optional[int] = None,
+            closed: bool = True,
+            show: bool = False
+        ) -> List[List[Any]]:
         """
         獲取歷史K線數據
-        
+
         Args:
             symbol (str): 交易對名稱
             interval (str): 時間間隔，如 "1m", "5m", "1h", "1d" 等
-            limit (int): 數量限制
+            limit (int, optional): 數量限制。若與 since 同時存在，則從 since 開始最多取 limit 根
             closed (bool, optional): 是否只獲取已關閉的K線。默認為True
             show (bool, optional): 是否顯示獲取進度。默認為False
-            
+            since (int, optional): 從這個時間戳（毫秒）開始取得K線資料
+
         Returns:
             list: K線數據列表
-            
+
         Raises:
             Exception: 獲取歷史數據失敗時拋出異常
         """
         symbol = self._modify_symbol_name(symbol)
-        max_limit = 1000  # Binance API 單次請求上限
+        max_limit = 1000
         all_klines = []
-        
+
         if not self._check_symbol_availability(symbol):
             raise Exception(f"{symbol} 不是有效的永續合約")
-        
+
         try:
-            if (closed):
+            if closed and not since and limit:
                 limit += 1
-            
+
+            if since:
+                fetch_limit = max_limit if limit is None else min(max_limit, limit)
+                start_time = since
+
+                while True:
+                    if show:
+                        print(f"Fetching klines from {start_time} for {symbol}...")
+
+                    klines = self.client.get_historical_klines(
+                        symbol=symbol,
+                        interval=interval,
+                        limit=fetch_limit,
+                        start_str=start_time,
+                        klines_type=HistoricalKlinesType.FUTURES
+                    )
+
+                    if not klines:
+                        break
+
+                    all_klines.extend(klines)
+
+                    if limit and len(all_klines) >= limit:
+                        all_klines = all_klines[:limit]
+                        break
+
+                    if len(klines) < fetch_limit:
+                        break  # 沒有更多資料了
+
+                    start_time = klines[-1][0] + 1  # 下一次從最後一根之後開始
+
+                if closed and all_klines and all_klines[-1][6] > int(time.time() * 1000):
+                    all_klines = all_klines[:-1]
+
+                return all_klines
+
+            # 沒有 since，沿用舊邏輯往回抓
+            if closed and limit:
+                limit += 1
             remaining = limit
-            
+
             while remaining > 0:
-                
                 if show:
                     print(f"Fetching {remaining} OHLCV data for {symbol}...")
-                
+
                 fetch_limit = min(max_limit, remaining)
-                
+
                 if all_klines:
                     time_diff = all_klines[1][0] - all_klines[0][0]
-                    since = all_klines[0][0] - time_diff * fetch_limit
-                    
-                    klines = self.client.get_historical_klines(symbol=symbol, interval=interval, limit=fetch_limit, start_str=since, klines_type=HistoricalKlinesType.FUTURES)
+                    since_ts = all_klines[0][0] - time_diff * fetch_limit
+                    klines = self.client.get_historical_klines(
+                        symbol=symbol,
+                        interval=interval,
+                        limit=fetch_limit,
+                        start_str=since_ts,
+                        klines_type=HistoricalKlinesType.FUTURES
+                    )
                 else:
-                    klines = self.client.get_historical_klines(symbol=symbol, interval=interval, limit=fetch_limit, klines_type=HistoricalKlinesType.FUTURES)
-            
+                    klines = self.client.get_historical_klines(
+                        symbol=symbol,
+                        interval=interval,
+                        limit=fetch_limit,
+                        klines_type=HistoricalKlinesType.FUTURES
+                    )
+
                 if not klines:
                     break
-                
+
                 all_klines = klines + all_klines
                 remaining -= fetch_limit
-                
+
                 if len(set([x[0] for x in all_klines])) != len(all_klines):
-                    print("Duplicate timestamps found, stopping fetch.")
                     raise Exception("Duplicate timestamp found")
-                
+
                 if show:
                     print(f"Fetched {len(all_klines)} OHLCV data for {symbol}, remaining: {remaining}")
-            
-            if not all_klines or len(all_klines) < limit:
-                print(f"獲取 {symbol} 歷史數據失敗，數據不足：{len(all_klines)} < {limit}")
+
+            if not all_klines or (limit and len(all_klines) < limit):
                 raise Exception(f"獲取 {symbol} 歷史數據失敗，數據不足：{len(all_klines)} < {limit}")
-            
-            if (closed):
-                all_klines = all_klines[:-1]  # 去除當前 K 線
-            
+
+            if closed:
+                all_klines = all_klines[:-1]
+
             return all_klines
-        
+
         except BinanceAPIException as e:
             raise Exception(f"獲取 {symbol} 歷史數據失敗：{e}")
     
