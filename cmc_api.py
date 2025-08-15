@@ -5,12 +5,13 @@ from dotenv import load_dotenv
 class CoinMarketCapAPI:
     """CoinMarketCap API handler for fetching cryptocurrency data."""
 
-    def __init__(self, cmc_api_key=None, env_path=".env"):
+    def __init__(self, cmc_api_key=None, env_path=".env", show_warning=True):
         
         if cmc_api_key:
             self.CMC_API_KEY = cmc_api_key
         else:
-            print("[Warning]: No CoinMarketCap API key provided. Using environment variable.")
+            if show_warning:
+                print("[Warning]: No CoinMarketCap API key provided. Using environment variable.")
             if not os.path.exists(env_path):
                 raise FileNotFoundError(f"Environment file {env_path} not found.")
             if not os.path.isfile(env_path):

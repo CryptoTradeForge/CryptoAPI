@@ -67,7 +67,7 @@ class BackDataFetcher:
             if self.verbose:
                 print("[Warning]: No cmc_api provided. Using default CoinMarketCapAPI.")
             from .cmc_api import CoinMarketCapAPI
-            self.cmc_api = CoinMarketCapAPI()
+            self.cmc_api = CoinMarketCapAPI(show_warning=self.verbose)
 
         if not self.exclusion_coins and self.verbose:
             print("[Warning]: No exclusion_coins_record provided. No exclusion functionality will be applied.")
