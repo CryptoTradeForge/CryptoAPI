@@ -51,27 +51,27 @@ class BackDataFetcher:
         self.use_extra_buffer = use_extra_buffer
         self.timezone = pytz.timezone("Asia/Taipei")
         
-        # Set up default APIs if not provided
-        if future_api is None:
-            from .futures.binance_api import BinanceFutures
-            future_api = BinanceFutures()
-            if self.verbose:
-                print("[Warning]: No future_api provided. Using default BinanceFutures API.")
-
-        if cmc_api is None:
-            from .cmc_api import CoinMarketCapAPI
-            cmc_api = CoinMarketCapAPI()
-            if self.verbose:
-                print("[Warning]: No cmc_api provided. Using default CoinMarketCapAPI.")
-
-        if not self.exclusion_coins and self.verbose:
-            print("[Warning]: No exclusion_coins_record provided. No exclusion functionality will be applied.")
-        
         self.future_api = future_api
         self.cmc_api = cmc_api
         self.exclusion_coins = exclusion_coins_record
         self.save_folder = save_folder
         
+        # Set up default APIs if not provided
+        if self.future_api is None:
+            from .futures.binance_api import BinanceFutures
+            self.future_api = BinanceFutures()
+            if self.verbose:
+                print("[Warning]: No future_api provided. Using default BinanceFutures API.")
+
+        if self.cmc_api is None:
+            from .cmc_api import CoinMarketCapAPI
+            self.cmc_api = CoinMarketCapAPI()
+            if self.verbose:
+                print("[Warning]: No cmc_api provided. Using default CoinMarketCapAPI.")
+
+        if not self.exclusion_coins and self.verbose:
+            print("[Warning]: No exclusion_coins_record provided. No exclusion functionality will be applied.")
+
 
     def get_historical_data_and_check(self, symbol: str, interval: str, limit: int):
         
