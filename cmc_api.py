@@ -6,12 +6,24 @@ from dotenv import load_dotenv
 class CoinMarketCapAPI:
     """CoinMarketCap API handler for fetching cryptocurrency data."""
 
-    def __init__(self, env_path: str = ".env"):
-        self.env_path = env_path
-        self.env = load_dotenv(self.env_path)
-        self.CMC_API_KEY = os.getenv("COINMARKETCAP_API_KEY")
-        if not self.CMC_API_KEY:
-            raise ValueError("CoinMarketCap API key not found in environment variables.")
+    def __init__(self, cmc_api_key=None, env_path=".env"):
+        
+        if cmc_api_key:
+            self.CMC_API_KEY = cmc_api_key
+        else:
+            if not os.path.exists(env_path):
+                raise FileNotFoundError(f"Environment file {env_path} not found.")
+            if not os.path.isfile(env_path):
+                raise ValueError(f"{env_path} is not a file.")
+            if not os.access(env_path, os.R_OK):
+                raise PermissionError(f"Cannot read environment file {env_path}.")
+
+            self.env = load_dotenv(env_path)
+            self.CMC_API_KEY = os.getenv("COINMARKETCAP_API_KEY")
+            
+            if not self.CMC_API_KEY:
+                raise ValueError("CoinMarketCap API key not found in environment variables.")
+            
 
     def get_top_cryptos(self, limit=None):
         """Fetch top cryptocurrencies from CoinMarketCap."""
