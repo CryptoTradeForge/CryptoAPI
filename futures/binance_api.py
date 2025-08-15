@@ -10,7 +10,7 @@ from typing import Optional, List, Dict, Union, Any, Tuple
 from .base import AbstractFuturesAPI
 
 class BinanceFutures(AbstractFuturesAPI):
-    def __init__(self, env_path: str = ".env"):
+    def __init__(self, api_key=None, api_secret=None, env_path=".env"):
         """
         初始化 Binance Futures 交易類別
         
@@ -18,10 +18,25 @@ class BinanceFutures(AbstractFuturesAPI):
             env_path (str, optional): 環境變數文件路徑. 默認值為 ".env"
         """
         
-        self.env_path = env_path
-        self.env = load_dotenv(self.env_path)
-        self.binance_api_key = os.getenv("BINANCE_API_KEY")
-        self.binance_api_secret = os.getenv("BINANCE_API_SECRET")
+        if api_key and api_secret:
+            self.binance_api_key = api_key
+            self.binance_api_secret = api_secret
+        else:
+            print("[Warning]: No Binance API key or secret provided. Using environment variables.")
+            if not os.path.exists(env_path):
+                raise FileNotFoundError(f"Environment file {env_path} not found.")
+            if not os.path.isfile(env_path):
+                raise ValueError(f"{env_path} is not a file.")
+            if not os.access(env_path, os.R_OK):
+                raise PermissionError(f"Cannot read environment file {env_path}.")
+            
+            self.env = load_dotenv(env_path)
+            self.binance_api_key = os.getenv("BINANCE_API_KEY")
+            self.binance_api_secret = os.getenv("BINANCE_API_SECRET")
+            
+            if not self.binance_api_key or not self.binance_api_secret:
+                raise ValueError("Binance API key or secret not found in environment variables.")
+        
         self._initialize_client()
 
     def _initialize_client(self) -> None:

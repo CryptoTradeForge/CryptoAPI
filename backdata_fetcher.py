@@ -58,16 +58,16 @@ class BackDataFetcher:
         
         # Set up default APIs if not provided
         if self.future_api is None:
-            from .futures.binance_api import BinanceFutures
-            self.future_api = BinanceFutures()
             if self.verbose:
                 print("[Warning]: No future_api provided. Using default BinanceFutures API.")
+            from .futures.binance_api import BinanceFutures
+            self.future_api = BinanceFutures()
 
         if self.cmc_api is None:
-            from .cmc_api import CoinMarketCapAPI
-            self.cmc_api = CoinMarketCapAPI()
             if self.verbose:
                 print("[Warning]: No cmc_api provided. Using default CoinMarketCapAPI.")
+            from .cmc_api import CoinMarketCapAPI
+            self.cmc_api = CoinMarketCapAPI()
 
         if not self.exclusion_coins and self.verbose:
             print("[Warning]: No exclusion_coins_record provided. No exclusion functionality will be applied.")
