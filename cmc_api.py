@@ -2,16 +2,24 @@ import os
 import requests
 from dotenv import load_dotenv
 
+from logging import getLogger
+
 class CoinMarketCapAPI:
     """CoinMarketCap API handler for fetching cryptocurrency data."""
 
-    def __init__(self, cmc_api_key=None, env_path=".env", show_warning=True):
+    def __init__(self, cmc_api_key=None, env_path=".env", show_warning=True, logger=None):
+        
+        if logger is None:
+            self.logger = getLogger(__name__)
+        else:
+            self.logger = logger
         
         if cmc_api_key:
             self.CMC_API_KEY = cmc_api_key
         else:
             if show_warning:
-                print("[Warning]: No CoinMarketCap API key provided. Using environment variable.")
+                # print("[Warning]: No CoinMarketCap API key provided. Using environment variable.")
+                self.logger.warning("No CoinMarketCap API key provided. Using environment variable.")
             if not os.path.exists(env_path):
                 raise FileNotFoundError(f"Environment file {env_path} not found.")
             if not os.path.isfile(env_path):
@@ -23,6 +31,7 @@ class CoinMarketCapAPI:
             self.CMC_API_KEY = os.getenv("COINMARKETCAP_API_KEY")
             
             if not self.CMC_API_KEY:
+                self.logger.error("CoinMarketCap API key not found in environment variables.")
                 raise ValueError("CoinMarketCap API key not found in environment variables.")
             
 
@@ -41,6 +50,7 @@ class CoinMarketCapAPI:
             top_cryptos_list = top_cryptos_list[:limit]
         
         if not top_cryptos_list:
+            self.logger.error("No valid cryptocurrencies found in the top list.")
             raise ValueError("No valid cryptocurrencies found in the top list.")
         
         return top_cryptos_list
