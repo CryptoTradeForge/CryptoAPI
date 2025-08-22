@@ -173,7 +173,7 @@ class BackDataFetcher:
         """
         symbols = self.cmc_api.get_top_cryptos(limit=topk)
         if self.exclusion_coins:
-            symbols = self.exclusion_coins.filter_coins(symbols)
+            symbols = self.exclusion_coins.filter_symbols(symbols)
         if not symbols:
             raise ValueError("No valid cryptocurrencies found in the top list after filtering.")
         return self.fetch_data_symbols(symbols, limit, buffer)
