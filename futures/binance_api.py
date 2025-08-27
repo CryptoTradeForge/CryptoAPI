@@ -1,33 +1,75 @@
 import os
-from dotenv import load_dotenv
 import time
+from dotenv import load_dotenv
 from decimal import Decimal, ROUND_DOWN
+from typing import Optional, List, Dict, Any, Tuple
+from logging import getLogger
+
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
 from binance.enums import HistoricalKlinesType
-from typing import Optional, List, Dict, Union, Any, Tuple
 
 from .base import AbstractFuturesAPI
 
 class BinanceFutures(AbstractFuturesAPI):
-    def __init__(self, api_key=None, api_secret=None, env_path=".env"):
+    """
+    Binance Futures 交易API封裝 class
+    
+    提供完整的幣安期貨交易功能，包括：
+    - 市價與限價開倉
+    - 止損止盈條件單設置
+    - 倉位管理與平倉
+    - 訂單管理
+    - 資產查詢
+    - 歷史數據獲取
+    - 多餘訂單清理
+    
+    Features:
+    - 統一的返回格式 {"success": bool, "action": str, "details": {...}, "error_message": str}
+    - 自動精度處理，符合Binance API要求
+    - 自動設置逐倉模式 (ISOLATED)
+    - logger 只針對交易方法使用 (查詢方法不使用logger，直接拋出異常)
+    
+    Usage:
+        api = BinanceFutures(api_key="your_key", api_secret="your_secret", logger=your_logger)
+        result = api.place_market_order("BTCUSDT", "LONG", 10, 100.0, stop_loss_price=95000.0)
+    """
+    
+    def __init__(self, api_key=None, api_secret=None, logger = None, env_path=".env"):
         """
         初始化 Binance Futures 交易類別
         
         Args:
-            env_path (str, optional): 環境變數文件路徑. 默認值為 ".env"
+            api_key (str, optional): Binance API Key，若不提供則從環境變數讀取
+            api_secret (str, optional): Binance API Secret，若不提供則從環境變數讀取  
+            logger (Logger, optional): 日誌記錄器實例，若不提供則使用預設logger
+            env_path (str, optional): 環境變數文件路徑，默認為 ".env"
+            
+        Raises:
+            FileNotFoundError: 環境變數文件不存在
+            ValueError: 環境變數文件格式錯誤或API憑證不完整
+            PermissionError: 無法讀取環境變數文件
         """
+        
+        if logger is None:
+            self.logger = getLogger(__name__)
+        else:
+            self.logger = logger
+        
         
         if api_key and api_secret:
             self.binance_api_key = api_key
             self.binance_api_secret = api_secret
         else:
-            print("[Warning]: No Binance API key or secret provided. Using environment variables.")
+            self.logger.warning("No Binance API key or secret provided. Using environment variables.")
             if not os.path.exists(env_path):
+                self.logger.error(f"Environment file {env_path} not found.")
                 raise FileNotFoundError(f"Environment file {env_path} not found.")
             if not os.path.isfile(env_path):
+                self.logger.error(f"{env_path} is not a file.")
                 raise ValueError(f"{env_path} is not a file.")
             if not os.access(env_path, os.R_OK):
+                self.logger.error(f"Cannot read environment file {env_path}.")
                 raise PermissionError(f"Cannot read environment file {env_path}.")
             
             self.env = load_dotenv(env_path)
@@ -35,6 +77,7 @@ class BinanceFutures(AbstractFuturesAPI):
             self.binance_api_secret = os.getenv("BINANCE_API_SECRET")
             
             if not self.binance_api_key or not self.binance_api_secret:
+                self.logger.error("Binance API key or secret not found in environment variables.")
                 raise ValueError("Binance API key or secret not found in environment variables.")
         
         self._initialize_client()
@@ -51,9 +94,14 @@ class BinanceFutures(AbstractFuturesAPI):
         )
         self.client.synced = True
 
+    
+    
+    
+    
+    # 交易方法 --------------------------------------------------
     def set_stop_loss_take_profit(self, symbol: str, side: str, quantity: float, 
                                 stop_loss_price: Optional[float] = None, 
-                                take_profit_price: Optional[float] = None) -> None:
+                                take_profit_price: Optional[float] = None) -> Dict[str, Any]:
         """
         設置止損和止盈條件單
         
@@ -64,21 +112,48 @@ class BinanceFutures(AbstractFuturesAPI):
             stop_loss_price (float, optional): 止損價格
             take_profit_price (float, optional): 止盈價格
             
-        Raises:
-            Exception: 設置止損止盈單失敗時拋出異常
+        Returns:
+            dict: 操作結果
+            {
+                "success": bool,
+                "action": str,
+                "details": {
+                    "symbol": str,
+                    "side": str,
+                    "quantity": str,
+                    "stop_loss_price": str or None,
+                    "take_profit_price": str or None,
+                    "stop_loss_set": bool,
+                    "take_profit_set": bool
+                },
+                "error_message": str (only when failed)
+            }
         """
         symbol = self._modify_symbol_name(symbol)
+        result = {
+            "success": False,
+            "action": f"Set stop-loss and take-profit orders for {symbol} {side} position",
+            "details": {
+                "symbol": symbol,
+                "side": side,
+                "quantity": quantity,
+                "stop_loss_price": stop_loss_price,
+                "take_profit_price": take_profit_price
+            }
+        }
+        
         try:
-            
             # Get symbol info to handle precision and step sizes
             price_precision, quantity_precision = self._get_symbol_precision(symbol)
             
             # 止損單設置
             if stop_loss_price:
-                
                 # Round stop loss price and quantity to the correct precision
-                stop_loss_price = self._truncate_to_precision(stop_loss_price, price_precision)
-                quantity = self._truncate_to_precision(quantity, quantity_precision)
+                processed_stop_loss_price = self._truncate_to_precision(stop_loss_price, price_precision)
+                processed_quantity = self._truncate_to_precision(quantity, quantity_precision)
+                
+                result["details"]["stop_loss_price"] = processed_stop_loss_price
+                result["details"]["quantity"] = processed_quantity
                 
                 # Determine the side for stop loss order
                 stop_side = "SELL" if side.upper() == "BUY" or side == "LONG" else "BUY"
@@ -86,19 +161,23 @@ class BinanceFutures(AbstractFuturesAPI):
                     symbol=symbol,
                     side=stop_side,
                     type="STOP_MARKET",
-                    quantity=quantity,
-                    stopPrice=stop_loss_price,
+                    quantity=processed_quantity,
+                    stopPrice=processed_stop_loss_price,
                     reduceOnly=True,
                     timeInForce="GTC"
                 )
-                print(f"設置 {symbol} {side} 止損單成功，止損價格：{stop_loss_price}")
+                # print(f"設置 {symbol} {side} 止損單成功，止損價格：{processed_stop_loss_price}")
+                self.logger.info(f"設置 {symbol} {side} 止損單成功，止損價格：{processed_stop_loss_price}")
+                result["details"]["stop_loss_set"] = True
                 
             # 止盈單設置
             if take_profit_price:
-                
                 # Round take profit price and quantity to the correct precision
-                take_profit_price = self._truncate_to_precision(take_profit_price, price_precision)
-                quantity = self._truncate_to_precision(quantity, quantity_precision)
+                processed_take_profit_price = self._truncate_to_precision(take_profit_price, price_precision)
+                processed_quantity = self._truncate_to_precision(quantity, quantity_precision)
+                
+                result["details"]["take_profit_price"] = processed_take_profit_price
+                result["details"]["quantity"] = processed_quantity
                 
                 # Determine the side for take profit order
                 tp_side = "SELL" if side.upper() == "BUY" or side == "LONG" else "BUY"
@@ -106,24 +185,31 @@ class BinanceFutures(AbstractFuturesAPI):
                     symbol=symbol,
                     side=tp_side,
                     type="TAKE_PROFIT_MARKET",
-                    quantity=str(quantity),
-                    stopPrice=take_profit_price,
+                    quantity=str(processed_quantity),
+                    stopPrice=processed_take_profit_price,
                     reduceOnly=True,
                     timeInForce="GTC"
                 )
-                print(f"設置 {symbol} {side} 止盈單成功，止盈價格：{take_profit_price}")
+                # print(f"設置 {symbol} {side} 止盈單成功，止盈價格：{processed_take_profit_price}")
+                self.logger.info(f"設置 {symbol} {side} 止盈單成功，止盈價格：{processed_take_profit_price}")
+                result["details"]["take_profit_set"] = True
+            
+            result["success"] = True
+            return result
                 
         except BinanceAPIException as e:
-            print(f"設置止損止盈單失敗: {e}")
+            # print(f"{symbol} {side} 設置止損止盈單失敗：{e}")
+            self.logger.error(f"{symbol} {side} 設置止損止盈單失敗：{e}")
+            result["error_message"] = str(e)
             
             # 平倉
             self.close_position(symbol, "LONG" if side == "BUY" else "SHORT")
-            raise Exception(f"設置止損止盈單失敗: {e}")
+            return result
 
 
     def place_market_order(self, symbol: str, position_type: str, leverage: int, amount: float, 
                           stop_loss_price: Optional[float] = None, 
-                          take_profit_price: Optional[float] = None) -> None:
+                          take_profit_price: Optional[float] = None) -> Dict[str, Any]:
         """
         市價開倉交易
         
@@ -135,22 +221,60 @@ class BinanceFutures(AbstractFuturesAPI):
             stop_loss_price (float, optional): 止損價格
             take_profit_price (float, optional): 止盈價格
             
-        Raises:
-            Exception: 開倉失敗時拋出異常
+        Returns:
+            dict: 操作結果
+            {
+                "success": bool,
+                "action": str,
+                "details": {
+                    "symbol": str,
+                    "position_type": str,
+                    "leverage": int,
+                    "amount": float,
+                    "price": str,
+                    "quantity": str,
+                    "stop_loss_price": str or None,
+                    "take_profit_price": str or None
+                },
+                "error_message": str (only when failed)
+            }
+            
+        Note:
+            - 自動設置為逐倉模式 (ISOLATED)
+            - 若提供止損/止盈價格，會在開倉成功後自動設置相關條件單
+            - 若止損/止盈設置失敗，會自動平倉並返回錯誤
         """
+        result = {
+            "success": False,
+            "action": f"Place market {position_type} order for {symbol}",
+            "details": {
+                "symbol": symbol,
+                "position_type": position_type,
+                "leverage": leverage,
+                "amount": amount,
+                "stop_loss_price": stop_loss_price,
+                "take_profit_price": take_profit_price
+            }
+        }
+        
         try:
             symbol = self._modify_symbol_name(symbol)
             side = "BUY" if position_type.upper() == "LONG" or position_type == "BUY" else "SELL"
+            
+            # 取得價格並計算數量
             price = self.get_price(symbol)
             quantity = amount / price
             
             # Get symbol info to handle precision and step sizes
             price_precision, quantity_precision = self._get_symbol_precision(symbol)
             
-            # Round quantity and price to the correct precision
-            quantity = self._truncate_to_precision(quantity, quantity_precision)
-            price = self._truncate_to_precision(price, price_precision)
+            # 處理精度並更新到 details
+            result["details"]["price"] = self._truncate_to_precision(price, price_precision)
+            result["details"]["quantity"] = self._truncate_to_precision(quantity, quantity_precision)
             
+            # 使用處理後的值
+            quantity = result["details"]["quantity"]
+            price = result["details"]["price"]
             
             # 設定槓桿
             self.client.futures_change_leverage(symbol=symbol, leverage=leverage)
@@ -170,28 +294,76 @@ class BinanceFutures(AbstractFuturesAPI):
                 quantity=quantity
             )
             
-            print(f"開 {position_type} 倉成功，數量：{quantity}，價格：{price}")
+            # print(f"開 {position_type} 倉成功，數量：{quantity}，價格：{price}")
+            self.logger.info(f"{symbol} 開 {position_type} 市價單成功，數量：{quantity}，價格：{price}")
+            
             # 設置止損止盈
-            self.set_stop_loss_take_profit(symbol, side, quantity, stop_loss_price, take_profit_price)
+            sl_tp_result = self.set_stop_loss_take_profit(symbol, side, float(quantity), stop_loss_price, take_profit_price)
+            
+            # 檢查止損止盈設置結果
+            if not sl_tp_result["success"]:
+                # 止損止盈設置失敗，拋出異常讓外層處理
+                raise Exception(f"止盈止損設置失敗: {sl_tp_result.get('error_message', 'Unknown error')}")
+            
+            # 更新止損止盈價格到 details
+            if stop_loss_price and "stop_loss_price" in sl_tp_result["details"]:
+                result["details"]["stop_loss_price"] = sl_tp_result["details"]["stop_loss_price"]
+            if take_profit_price and "take_profit_price" in sl_tp_result["details"]:
+                result["details"]["take_profit_price"] = sl_tp_result["details"]["take_profit_price"]
+            
+            result["success"] = True
+            return result
             
         except BinanceAPIException as e:
-            raise Exception(f"開 {position_type} 市價單失敗：{e}")
+            self.logger.error(f"{symbol} 開 {position_type} 市價單失敗：{e}")
+            result["error_message"] = str(e)
+            return result
 
 
-    def place_limit_order(self, symbol: str, position_type: str, price: float, leverage: int, amount: float) -> None:
+    def place_limit_order(self, symbol: str, position_type: str, price: float, leverage: int, amount: float) -> Dict[str, Any]:
         """
         限價開倉交易
         
         Args:
             symbol (str): 交易對名稱
             position_type (str): 倉位類型 ("LONG"/"SHORT")
-            price (float): 限價
+            price (float): 限價價格
             leverage (int): 槓桿倍數
             amount (float): 交易金額 (USDT)
             
-        Raises:
-            Exception: 開倉失敗時拋出異常
+        Returns:
+            dict: 操作結果
+            {
+                "success": bool,
+                "action": str,
+                "details": {
+                    "symbol": str,
+                    "position_type": str,
+                    "price": str,
+                    "leverage": int,
+                    "amount": float,
+                    "quantity": str
+                },
+                "error_message": str (only when failed)
+            }
+            
+        Note:
+            - 自動設置為逐倉模式 (ISOLATED)
+            - 訂單類型為 GTC (Good Till Cancelled)
+            - 限價單不會自動設置止損/止盈，需要單獨調用相關方法
         """
+        result = {
+            "success": False,
+            "action": f"Place limit {position_type} order for {symbol}",
+            "details": {
+                "symbol": symbol,
+                "position_type": position_type,
+                "price": price,
+                "leverage": leverage,
+                "amount": amount
+            }
+        }
+        
         try:
             # Modify symbol name for API
             symbol = self._modify_symbol_name(symbol)
@@ -205,9 +377,13 @@ class BinanceFutures(AbstractFuturesAPI):
             # Get symbol info to handle precision and step sizes
             price_precision, quantity_precision = self._get_symbol_precision(symbol)
             
-            # Round quantity and price to the correct precision
-            quantity = self._truncate_to_precision(quantity, quantity_precision)
-            price = self._truncate_to_precision(price, price_precision)
+            # 處理精度並更新到 details
+            result["details"]["price"] = self._truncate_to_precision(price, price_precision)
+            result["details"]["quantity"] = self._truncate_to_precision(quantity, quantity_precision)
+            
+            # 使用處理後的值
+            quantity = result["details"]["quantity"]
+            price = result["details"]["price"]
             
             # Set leverage
             self.client.futures_change_leverage(symbol=symbol, leverage=leverage)
@@ -229,11 +405,18 @@ class BinanceFutures(AbstractFuturesAPI):
                 timeInForce="GTC"
             )
             
+            self.logger.info(f"{symbol} 開 {position_type} 限價單成功，數量：{quantity}，價格：{price}")
+            
+            result["success"] = True
+            return result
+            
         except BinanceAPIException as e:
-            raise Exception(f"開 {position_type} 限價單失敗：{e}")
+            self.logger.error(f"{symbol} 開 {position_type} 限價單失敗：{e}")
+            result["error_message"] = str(e)
+            return result
 
 
-    def close_position(self, symbol: str, position_type: str) -> None:
+    def close_position(self, symbol: str, position_type: str) -> Dict[str, Any]:
         """
         平倉指定倉位並取消相關止盈止損條件單
         
@@ -241,17 +424,46 @@ class BinanceFutures(AbstractFuturesAPI):
             symbol (str): 交易對名稱
             position_type (str): 倉位類型 ("LONG"/"SHORT")
             
-        Raises:
-            Exception: 平倉失敗時拋出異常
+        Returns:
+            dict: 操作結果
+            {
+                "success": bool,
+                "action": str,
+                "details": {
+                    "symbol": str,
+                    "position_type": str,
+                    "position_found": bool,
+                    "quantity": str or None,
+                    "orders_cancelled": bool  # 是否成功取消相關止盈止損訂單
+                },
+                "error_message": str (only when failed)
+            }
+            
+        Note:
+            - 若無對應持倉，將返回成功狀態但 position_found 為 False
+            - 只有在完全沒有該symbol持倉時才會取消止盈止損相關訂單
+            - 若平倉後仍有其他持倉，則不會取消止盈止損訂單
         """
+        result = {
+            "success": False,
+            "action": f"Close {position_type} position for {symbol}",
+            "details": {
+                "symbol": symbol,
+                "position_type": position_type
+            }
+        }
+        
         try:
             symbol = self._modify_symbol_name(symbol)
             position = self.get_positions(symbol=symbol)
             
-            
             if not position or position[0]["side"] != position_type:
-                print("無可用持倉，跳過平倉操作。")
-                return
+                result["success"] = True  # 沒有持倉也算成功
+                result["details"]["position_found"] = False
+                self.logger.warning(f"{symbol} 無可用 {position_type} 持倉，跳過平倉操作。")
+                return result
+            
+            result["details"]["position_found"] = True
             
             quantity = float(position[0]["notional"])
             quantity = quantity if position_type == "BUY" else -quantity
@@ -265,9 +477,11 @@ class BinanceFutures(AbstractFuturesAPI):
             
             quantity_precision = self._get_precision_from_step(step_size)
             
-            # Round quantity and price to the correct precision
-            quantity = self._truncate_to_precision(quantity, quantity_precision)
+            # 處理精度並更新到 details
+            result["details"]["quantity"] = self._truncate_to_precision(quantity, quantity_precision)
             
+            # 使用處理後的值
+            quantity = result["details"]["quantity"]
             
             # 執行平倉
             side = "SELL" if (position_type == "long" or position_type == "BUY") else "BUY"
@@ -278,16 +492,31 @@ class BinanceFutures(AbstractFuturesAPI):
                 quantity=quantity,
                 reduceOnly=True
             )
+            
+            self.logger.info(f"{symbol} 平 {position_type} 倉成功，數量：{quantity}")
+            
         except BinanceAPIException as e:
-            print(f"平倉失敗：{e}")
+            self.logger.error(f"{symbol} {position_type} 平倉失敗：{e}")
+            result["error_message"] = str(e)
+            return result
         
         try:
             # 取消相關訂單
-            self._cancel_related_orders(symbol)
+            if not self.get_positions(symbol=symbol):
+                self._cancel_related_orders(symbol)
+                result["details"]["orders_cancelled"] = True
+            else:
+                result["details"]["orders_cancelled"] = False
+                self.logger.warning(f"{symbol} 尚有持倉，跳過取消止盈止損相關訂單操作。")
+            
+            result["success"] = True
+            return result
         except BinanceAPIException as e:
-            raise Exception(f"平 {position_type} 倉失敗：{e}")
+            self.logger.error(f"{symbol} 取消止盈止損相關訂單失敗：{e}")
+            result["error_message"] = str(e)
+            return result
     
-    def cancel_order(self, symbol: str, type: Optional[str] = None) -> None:
+    def cancel_order(self, symbol: str, type: Optional[str] = None) -> Dict[str, Any]:
         """
         取消訂單
         
@@ -295,21 +524,102 @@ class BinanceFutures(AbstractFuturesAPI):
             symbol (str): 交易對名稱
             type (str, optional): 訂單類型
             
-        Raises:
-            Exception: 取消訂單失敗時拋出異常
+        Returns:
+            dict: 操作結果
+            {
+                "success": bool,
+                "action": str,
+                "details": {
+                    "symbol": str,
+                    "type": str or None,
+                    "cancelled_orders": list,
+                    "cancelled_count": int
+                },
+                "error_message": str (only when failed)
+            }
         """
+        result = {
+            "success": False,
+            "action": f"Cancel {type or 'all'} orders for {symbol}",
+            "details": {
+                "symbol": symbol,
+                "type": type
+            }
+        }
+        
         try:
             symbol = self._modify_symbol_name(symbol)
+            
             orders = self.get_open_orders(symbol=symbol, type=type)
             
-            
+            cancelled_orders = []
             for order in orders:
                 self.client.futures_cancel_order(symbol=symbol, orderId=order["orderId"])
-                print(f"取消 {symbol} {type} 訂單成功： {order['orderId']}")
+                self.logger.info(f"取消 {symbol} {type} 訂單成功： {order['orderId']}")
+                cancelled_orders.append(order["orderId"])
+            
+            result["success"] = True
+            result["details"]["cancelled_orders"] = cancelled_orders
+            result["details"]["cancelled_count"] = len(cancelled_orders)
+            return result
         
         except BinanceAPIException as e:
-            raise Exception(f"取消 {symbol} 訂單失敗：{e}")
+            self.logger.error(f"{symbol} 取消訂單失敗：{e}")
+            result["error_message"] = str(e)
+            return result
     
+    
+    def clean_orphan_orders(self) -> Dict[str, Any]:
+        """
+        清理多餘訂單 (已觸發止損或止盈反向訂單可能會被留下)
+        
+        Returns:
+            dict: 操作結果
+            {
+                "success": bool,
+                "action": str,
+                "details": {
+                    "cleaned_symbols": list,
+                    "cleaned_count": int
+                },
+                "error_message": str (only when failed)
+            }
+        """
+        result = {
+            "success": False,
+            "action": "Clean orphaned orders",
+            "details": {}
+        }
+        
+        try:
+            cleaned_symbols = []
+            for order in self.get_open_orders():
+                symbol = order['symbol']
+                # 要排除 限價單
+                if order['type'] == 'LIMIT':
+                    continue
+                
+                if not self.get_positions(symbol=symbol):
+                    self._cancel_related_orders(symbol)
+                    if symbol not in cleaned_symbols:
+                        cleaned_symbols.append(symbol)
+            
+            result["success"] = True
+            result["details"]["cleaned_symbols"] = cleaned_symbols
+            result["details"]["cleaned_count"] = len(cleaned_symbols)
+            return result
+            
+        except Exception as e:
+            # print(f"清理多餘訂單失敗: {e}")
+            self.logger.error(f"清理多餘訂單失敗: {e}")
+            result["error_message"] = str(e)
+            return result
+    
+    
+    
+    
+    
+    # 獲取資料方法 --------------------------------------------------
     def get_positions(self, symbol: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         獲取持倉資訊
@@ -385,14 +695,13 @@ class BinanceFutures(AbstractFuturesAPI):
         Returns:
             dict: 包含可用餘額、已用餘額和總餘額的字典
             {
-                "free": float, # 可用餘額
-                "used": float, # 已用餘額
-                "total": float # 總餘額
+                "free": float,   # 可用餘額
+                "used": float,   # 已用餘額 (初始保證金)
+                "total": float   # 總餘額 (錢包餘額)
             }
             
         Raises:
-            ValueError: USDT資產不存在時拋出
-            BinanceAPIException: API調用失敗時捕獲
+            Exception: 獲取USDT餘額失敗時拋出異常
         """
         try:
             
@@ -408,9 +717,8 @@ class BinanceFutures(AbstractFuturesAPI):
             raise ValueError("USDT 資產不存在")
         
         except BinanceAPIException as e:
-            print(f"獲取餘額失敗：{e}")
-            self._log_error("global", "獲取餘額", e)
-            return None
+            raise Exception(f"獲取USDT餘額失敗：{e}")
+    
 
     def get_price(self, symbol: str) -> float:
         """
@@ -473,10 +781,16 @@ class BinanceFutures(AbstractFuturesAPI):
             since (int, optional): 從這個時間戳（毫秒）開始取得K線資料
 
         Returns:
-            list: K線數據列表
+            list: K線數據列表，每個元素為包含 [開盤時間, 開盤價, 最高價, 最低價, 收盤價, 交易量, 收盤時間, ...] 的列表
 
         Raises:
             Exception: 獲取歷史數據失敗時拋出異常
+            
+        Note:
+            - 自動驗證交易對是否為有效的永續合約
+            - 當 show=True 時，進度信息會通過 print 輸出
+            - 若 closed=True，將不包含當前未關閉的K線
+            - 若 limit 與 since 同時提供，將從指定時間開始獲取最多 limit 根K線
         """
         symbol = self._modify_symbol_name(symbol)
         max_limit = 1000
@@ -577,18 +891,7 @@ class BinanceFutures(AbstractFuturesAPI):
             raise Exception(f"獲取 {symbol} 歷史數據失敗：{e}")
     
     
-    def clean_orphan_orders(self) -> None:
-        """
-        清理多餘訂單 (已觸發止損或止盈反向訂單可能會被留下)
-        """
-        
-        for order in self.get_open_orders():
-            symbol = order['symbol']
-            # 要排除 限價單
-            if order['type'] == 'limit':
-                continue
-            if not self.get_positions(symbol=symbol):
-                self._cancel_related_orders(symbol)
+    
     
     
     # 輔助方法 --------------------------------------------------
@@ -598,18 +901,25 @@ class BinanceFutures(AbstractFuturesAPI):
         
         Args:
             symbol (str): 交易對名稱
-            
+        
         Raises:
-            BinanceAPIException: 取消訂單失敗時捕獲但不拋出
+            BinanceAPIException: 取消訂單失敗時拋出異常
+        
+        Note:
+            - 只取消 STOP_MARKET 和 TAKE_PROFIT_MARKET 類型的訂單
+            - 成功取消的訂單會記錄到 info 級別日誌
         """
         try:
             symbol = self._modify_symbol_name(symbol)
             for order in self.get_open_orders(symbol=symbol) or []:
                 if (order['type'] in ['STOP_MARKET', 'TAKE_PROFIT_MARKET']):
                     self.client.futures_cancel_order(symbol=symbol, orderId=order['orderId'])
-                    print(f"取消 {symbol} {order['type']} 訂單成功： {order['orderId']}")
+                    # print(f"取消 {symbol} {order['type']} 訂單成功： {order['orderId']}")
+                    self.logger.info(f"取消 {symbol} {order['type']} 訂單成功： {order['orderId']}")
         except BinanceAPIException as e:
-            print(f"取消 {symbol} 訂單失敗：{e}")
+            # print(f"取消 {symbol} 訂單失敗：{e}")
+            self.logger.error(f"取消 {symbol} 止盈止損訂單失敗：{e}")
+            raise e
 
     def _modify_symbol_name(self, symbol: str) -> str:
         """
