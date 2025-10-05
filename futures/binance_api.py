@@ -157,7 +157,7 @@ class BinanceFutures(AbstractFuturesAPI):
                 
                 # Determine the side for stop loss order
                 stop_side = "SELL" if side.upper() == "BUY" or side == "LONG" else "BUY"
-                self.client.futures_create_order(
+                sl_info = self.client.futures_create_order(
                     symbol=symbol,
                     side=stop_side,
                     type="STOP_MARKET",
@@ -167,8 +167,9 @@ class BinanceFutures(AbstractFuturesAPI):
                     timeInForce="GTC"
                 )
                 # print(f"設置 {symbol} {side} 止損單成功，止損價格：{processed_stop_loss_price}")
-                self.logger.info(f"設置 {symbol} {side} 止損單成功，止損價格：{processed_stop_loss_price}")
+                self.logger.info(f"設置 {symbol} {side} 止損單成功，止損價格：{processed_stop_loss_price}，訂單ID：{sl_info.get('orderId')}")
                 result["details"]["stop_loss_set"] = True
+                result["details"]["stop_loss_orderId"] = sl_info.get("orderId")
                 
             # 止盈單設置
             if take_profit_price:
@@ -181,7 +182,7 @@ class BinanceFutures(AbstractFuturesAPI):
                 
                 # Determine the side for take profit order
                 tp_side = "SELL" if side.upper() == "BUY" or side == "LONG" else "BUY"
-                self.client.futures_create_order(
+                tp_info = self.client.futures_create_order(
                     symbol=symbol,
                     side=tp_side,
                     type="TAKE_PROFIT_MARKET",
@@ -191,8 +192,9 @@ class BinanceFutures(AbstractFuturesAPI):
                     timeInForce="GTC"
                 )
                 # print(f"設置 {symbol} {side} 止盈單成功，止盈價格：{processed_take_profit_price}")
-                self.logger.info(f"設置 {symbol} {side} 止盈單成功，止盈價格：{processed_take_profit_price}")
+                self.logger.info(f"設置 {symbol} {side} 止盈單成功，止盈價格：{processed_take_profit_price}，訂單ID：{tp_info.get('orderId')}")
                 result["details"]["take_profit_set"] = True
+                result["details"]["take_profit_orderId"] = tp_info.get("orderId")
             
             result["success"] = True
             return result
@@ -287,7 +289,7 @@ class BinanceFutures(AbstractFuturesAPI):
                     raise e
             
             # 市價開倉
-            self.client.futures_create_order(
+            info = self.client.futures_create_order(
                 symbol=symbol,
                 side=side,
                 type="MARKET",
@@ -295,7 +297,8 @@ class BinanceFutures(AbstractFuturesAPI):
             )
             
             # print(f"開 {position_type} 倉成功，數量：{quantity}，價格：{price}")
-            self.logger.info(f"{symbol} 開 {position_type} 市價單成功，數量：{quantity}，價格：{price}")
+            self.logger.info(f"{symbol} 開 {position_type} 市價單成功，數量：{quantity}，價格：{price}，訂單ID：{info.get('orderId')}")
+            result["orderId"] = info.get("orderId")
             
             # 設置止損止盈
             sl_tp_result = self.set_stop_loss_take_profit(symbol, side, float(quantity), stop_loss_price, take_profit_price)
@@ -396,7 +399,7 @@ class BinanceFutures(AbstractFuturesAPI):
                     raise e
             
             # Place the limit order
-            self.client.futures_create_order(
+            info = self.client.futures_create_order(
                 symbol=symbol,
                 side=side,
                 type="LIMIT",
@@ -405,8 +408,9 @@ class BinanceFutures(AbstractFuturesAPI):
                 timeInForce="GTC"
             )
             
-            self.logger.info(f"{symbol} 開 {position_type} 限價單成功，數量：{quantity}，價格：{price}")
+            self.logger.info(f"{symbol} 開 {position_type} 限價單成功，數量：{quantity}，價格：{price}，訂單ID：{info.get('orderId')}")
             
+            result["orderId"] = info.get("orderId")
             result["success"] = True
             return result
             
@@ -485,7 +489,7 @@ class BinanceFutures(AbstractFuturesAPI):
             
             # 執行平倉
             side = "SELL" if (position_type == "long" or position_type == "BUY") else "BUY"
-            self.client.futures_create_order(
+            info = self.client.futures_create_order(
                 symbol=symbol,
                 side=side,
                 type="MARKET",
@@ -493,7 +497,8 @@ class BinanceFutures(AbstractFuturesAPI):
                 reduceOnly=True
             )
             
-            self.logger.info(f"{symbol} 平 {position_type} 倉成功，數量：{quantity}")
+            result["orderId"] = info.get("orderId")
+            self.logger.info(f"{symbol} 平 {position_type} 倉成功，數量：{quantity}，訂單ID：{info.get('orderId')}")
             
         except BinanceAPIException as e:
             self.logger.error(f"{symbol} {position_type} 平倉失敗：{e}")
