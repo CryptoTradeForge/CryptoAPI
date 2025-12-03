@@ -1,5 +1,6 @@
 import os
 import time
+import requests
 from dotenv import load_dotenv
 from decimal import Decimal, ROUND_DOWN
 from typing import Optional, List, Dict, Any, Tuple
@@ -816,12 +817,18 @@ class BinanceFutures(AbstractFuturesAPI):
                     if show:
                         print(f"Fetching klines from {start_time} for {symbol}...")
 
-                    klines = self.client.get_historical_klines(
+                    # klines = self.client.get_historical_klines(
+                    #     symbol=symbol,
+                    #     interval=interval,
+                    #     limit=fetch_limit,
+                    #     start_str=start_time,
+                    #     klines_type=HistoricalKlinesType.FUTURES
+                    # )
+                    klines = self._get_historical_klines_with_rate_limit(
                         symbol=symbol,
                         interval=interval,
                         limit=fetch_limit,
-                        start_str=start_time,
-                        klines_type=HistoricalKlinesType.FUTURES
+                        start_str=start_time
                     )
 
                     if not klines:
@@ -857,19 +864,30 @@ class BinanceFutures(AbstractFuturesAPI):
                 if all_klines:
                     time_diff = all_klines[1][0] - all_klines[0][0]
                     since_ts = all_klines[0][0] - time_diff * fetch_limit
-                    klines = self.client.get_historical_klines(
+                    # klines = self.client.get_historical_klines(
+                    #     symbol=symbol,
+                    #     interval=interval,
+                    #     limit=fetch_limit,
+                    #     start_str=since_ts,
+                    #     klines_type=HistoricalKlinesType.FUTURES
+                    # )
+                    klines = self._get_historical_klines_with_rate_limit(
                         symbol=symbol,
                         interval=interval,
                         limit=fetch_limit,
-                        start_str=since_ts,
-                        klines_type=HistoricalKlinesType.FUTURES
+                        start_str=since_ts
                     )
                 else:
-                    klines = self.client.get_historical_klines(
+                    # klines = self.client.get_historical_klines(
+                    #     symbol=symbol,
+                    #     interval=interval,
+                    #     limit=fetch_limit,
+                    #     klines_type=HistoricalKlinesType.FUTURES
+                    # )
+                    klines = self._get_historical_klines_with_rate_limit(
                         symbol=symbol,
                         interval=interval,
-                        limit=fetch_limit,
-                        klines_type=HistoricalKlinesType.FUTURES
+                        limit=fetch_limit
                     )
 
                 if not klines:
@@ -992,3 +1010,54 @@ class BinanceFutures(AbstractFuturesAPI):
         
         return price_precision, quantity_precision
     
+    
+    def _get_historical_klines_with_rate_limit(
+            self,
+            symbol: str,
+            interval: str,
+            limit: Optional[int] = None,
+            start_str: Optional[int] = None
+        ) -> List[List[Any]]:
+        """
+        獲取歷史K線數據，處理速率限制
+        
+        Args:
+            symbol (str): 交易對名稱
+            interval (str): 時間間隔
+            limit (int, optional): 數量限制
+            start_str (int, optional): 開始時間戳（毫秒）
+            
+        Returns:
+            list: K線數據列表
+        """
+        
+        params = {
+            "symbol": symbol,
+            "interval": interval
+        }
+        
+        if limit:
+            params["limit"] = limit
+        if start_str:
+            params["startTime"] = start_str
+        
+        response = requests.get(
+            f"https://fapi.binance.com/fapi/v1/klines",
+            params=params
+        )
+        
+        if response.status_code == 200:
+            return response.json()
+        elif response.status_code == 429:
+            retry_after = int(response.headers.get("retry-after", "1")) + 1
+            self.logger.warning(f"Rate limit exceeded when fetching klines for {symbol}. Retrying after {retry_after} seconds.")
+            time.sleep(retry_after)
+            return self._get_historical_klines_with_rate_limit(
+                symbol,
+                interval,
+                limit,
+                start_str
+            )
+        else:
+            self.logger.error(f"Failed to fetch klines for {symbol}. Status code: {response.status_code}, Response: {response.text}")
+            raise Exception(f"Failed to fetch klines for {symbol}. Status code: {response.status_code}")
