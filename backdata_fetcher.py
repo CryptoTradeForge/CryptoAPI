@@ -103,12 +103,12 @@ class BackDataFetcher:
         
         extra = EXTRA_BUFFER if self.use_extra_buffer else 0
         
-        data = {
+        data = { # future work: buffer 可設定要隨 timeframes 調整還是固定。
             '5m': self.get_historical_data_and_check(symbol=symbol, interval='5m', limit=limit + buffer + extra),
-            '15m': self.get_historical_data_and_check(symbol=symbol, interval='15m', limit=limit // 3 + buffer // 3 + extra),
-            '1h': self.get_historical_data_and_check(symbol=symbol, interval='1h', limit=limit // 12 + buffer // 12 + extra),
-            '4h': self.get_historical_data_and_check(symbol=symbol, interval='4h', limit=limit // 48 + buffer // 48 + extra),
-            '1d': self.get_historical_data_and_check(symbol=symbol, interval='1d', limit=limit // 288 + buffer // 288 + extra)
+            '15m': self.get_historical_data_and_check(symbol=symbol, interval='15m', limit=limit // 3 + buffer+ extra),
+            '1h': self.get_historical_data_and_check(symbol=symbol, interval='1h', limit=limit // 12 + buffer+ extra),
+            '4h': self.get_historical_data_and_check(symbol=symbol, interval='4h', limit=limit // 48 + buffer+ extra),
+            '1d': self.get_historical_data_and_check(symbol=symbol, interval='1d', limit=limit // 288 + buffer+ extra)
         }
         
         return data
@@ -147,12 +147,12 @@ class BackDataFetcher:
         
         extra = EXTRA_BUFFER if self.use_extra_buffer else 0
         
-        data = {
+        data = { # future work: buffer 可設定要隨 timeframes 調整還是固定。
             '5m': self.future_api.get_historical_data(symbol=symbol, interval='5m', since=since-TIMEFRAME_TO_MS['5m']*(buffer+extra)),
-            '15m': self.future_api.get_historical_data(symbol=symbol, interval='15m', since=since-TIMEFRAME_TO_MS['15m']*(buffer // 3 +extra)),
-            '1h': self.future_api.get_historical_data(symbol=symbol, interval='1h', since=since-TIMEFRAME_TO_MS['1h']*(buffer // 12 +extra)),
-            '4h': self.future_api.get_historical_data(symbol=symbol, interval='4h', since=since-TIMEFRAME_TO_MS['4h']*(buffer // 48 +extra)),
-            '1d': self.future_api.get_historical_data(symbol=symbol, interval='1d', since=since-TIMEFRAME_TO_MS['1d']*(buffer // 288 +extra))
+            '15m': self.future_api.get_historical_data(symbol=symbol, interval='15m', since=since-TIMEFRAME_TO_MS['15m']*(buffer+extra)),
+            '1h': self.future_api.get_historical_data(symbol=symbol, interval='1h', since=since-TIMEFRAME_TO_MS['1h']*(buffer +extra)),
+            '4h': self.future_api.get_historical_data(symbol=symbol, interval='4h', since=since-TIMEFRAME_TO_MS['4h']*(buffer+extra)),
+            '1d': self.future_api.get_historical_data(symbol=symbol, interval='1d', since=since-TIMEFRAME_TO_MS['1d']*(buffer+extra))
         }
         
         for interval, interval_data in data.items():
