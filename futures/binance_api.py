@@ -897,7 +897,7 @@ class BinanceFutures(AbstractFuturesAPI):
                 remaining -= fetch_limit
 
                 if len(set([x[0] for x in all_klines])) != len(all_klines):
-                    raise Exception("Duplicate timestamp found")
+                    raise Exception(f"Duplicate timestamp found in fetched klines for {symbol} with limit={limit}.")
 
                 if show:
                     print(f"Fetched {len(all_klines)} OHLCV data for {symbol}, remaining: {remaining}")
