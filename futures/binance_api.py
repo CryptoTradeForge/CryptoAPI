@@ -125,19 +125,18 @@ class BinanceFutures(AbstractFuturesAPI):
             time.sleep(7)  # 避免 API 請求過快
     
     # 交易方法 --------------------------------------------------
-    def set_stop_loss_take_profit(self, symbol: str, side: str, quantity: float, 
-                                stop_loss_price: Optional[float] = None, 
+    def set_stop_loss_take_profit(self, symbol: str, side: str,
+                                stop_loss_price: Optional[float] = None,
                                 take_profit_price: Optional[float] = None) -> Dict[str, Any]:
         """
         設置止損和止盈條件單
-        
+
         Args:
             symbol (str): 交易對名稱
             side (str): 倉位方向 ("BUY"/"SELL" 或 "LONG"/"SHORT")
-            quantity (float): 交易數量
             stop_loss_price (float, optional): 止損價格
             take_profit_price (float, optional): 止盈價格
-            
+
         Returns:
             dict: 操作結果
             {
@@ -146,7 +145,6 @@ class BinanceFutures(AbstractFuturesAPI):
                 "details": {
                     "symbol": str,
                     "side": str,
-                    "quantity": str,
                     "stop_loss_price": str or None,
                     "take_profit_price": str or None,
                     "stop_loss_set": bool,
@@ -162,63 +160,51 @@ class BinanceFutures(AbstractFuturesAPI):
             "details": {
                 "symbol": symbol,
                 "side": side,
-                "quantity": quantity,
                 "stop_loss_price": stop_loss_price,
                 "take_profit_price": take_profit_price
             }
         }
-        
+
         try:
             # Get symbol info to handle precision and step sizes
-            price_precision, quantity_precision = self._get_symbol_precision(symbol)
-            
+            price_precision, _ = self._get_symbol_precision(symbol)
+
             # 止損單設置
             if stop_loss_price:
-                # Round stop loss price and quantity to the correct precision
+                # Round stop loss price to the correct precision
                 processed_stop_loss_price = self._truncate_to_precision(stop_loss_price, price_precision)
-                processed_quantity = self._truncate_to_precision(quantity, quantity_precision)
-                
+
                 result["details"]["stop_loss_price"] = processed_stop_loss_price
-                result["details"]["quantity"] = processed_quantity
-                
+
                 # Determine the side for stop loss order
-                stop_side = "SELL" if side.upper() == "BUY" or side == "LONG" else "BUY"
+                stop_side = "SELL" if side.upper() == "BUY" or side.upper() == "LONG" else "BUY"
                 sl_info = self.client.futures_create_order(
                     symbol=symbol,
                     side=stop_side,
                     type="STOP_MARKET",
-                    quantity=processed_quantity,
                     stopPrice=processed_stop_loss_price,
-                    reduceOnly=True,
-                    timeInForce="GTC"
+                    closePosition=True
                 )
                 # print(f"設置 {symbol} {side} 止損單成功，止損價格：{processed_stop_loss_price}")
                 self.logger.info(f"設置 {symbol} {side} 止損單成功，止損價格：{processed_stop_loss_price}，訂單ID：{sl_info.get('orderId')}")
                 result["details"]["stop_loss_set"] = True
                 result["details"]["stop_loss_orderId"] = sl_info.get("orderId")
-                
-                if take_profit_price:
-                    time.sleep(1)  # 避免API請求過快
-                
+
             # 止盈單設置
             if take_profit_price:
-                # Round take profit price and quantity to the correct precision
+                # Round take profit price to the correct precision
                 processed_take_profit_price = self._truncate_to_precision(take_profit_price, price_precision)
-                processed_quantity = self._truncate_to_precision(quantity, quantity_precision)
-                
+
                 result["details"]["take_profit_price"] = processed_take_profit_price
-                result["details"]["quantity"] = processed_quantity
-                
+
                 # Determine the side for take profit order
-                tp_side = "SELL" if side.upper() == "BUY" or side == "LONG" else "BUY"
+                tp_side = "SELL" if side.upper() == "BUY" or side.upper() == "LONG" else "BUY"
                 tp_info = self.client.futures_create_order(
                     symbol=symbol,
                     side=tp_side,
                     type="TAKE_PROFIT_MARKET",
-                    quantity=str(processed_quantity),
                     stopPrice=processed_take_profit_price,
-                    reduceOnly=True,
-                    timeInForce="GTC"
+                    closePosition=True
                 )
                 # print(f"設置 {symbol} {side} 止盈單成功，止盈價格：{processed_take_profit_price}")
                 self.logger.info(f"設置 {symbol} {side} 止盈單成功，止盈價格：{processed_take_profit_price}，訂單ID：{tp_info.get('orderId')}")
@@ -234,7 +220,7 @@ class BinanceFutures(AbstractFuturesAPI):
             result["error_message"] = str(e)
             
             # 平倉
-            self.close_position(symbol, "LONG" if side == "BUY" else "SHORT")
+            self.close_position(symbol, "BUY" if side.upper() == "BUY" or side.upper() == "LONG" else "SELL")
             return result
 
 
@@ -290,7 +276,7 @@ class BinanceFutures(AbstractFuturesAPI):
         
         try:
             symbol = self._modify_symbol_name(symbol)
-            side = "BUY" if position_type.upper() == "LONG" or position_type == "BUY" else "SELL"
+            side = "BUY" if position_type.upper() == "LONG" or position_type.upper() == "BUY" else "SELL"
             
             # 取得價格並計算數量
             price = self.get_price(symbol)
@@ -326,8 +312,7 @@ class BinanceFutures(AbstractFuturesAPI):
             result["orderId"] = info.get("orderId")
             
             # 設置止損止盈
-            time.sleep(1)  # 等待1秒以確保倉位更新
-            sl_tp_result = self.set_stop_loss_take_profit(symbol, side, float(quantity), stop_loss_price, take_profit_price)
+            sl_tp_result = self.set_stop_loss_take_profit(symbol, side, stop_loss_price, take_profit_price)
             
             # 檢查止損止盈設置結果
             if not sl_tp_result["success"]:
@@ -449,7 +434,7 @@ class BinanceFutures(AbstractFuturesAPI):
         
         Args:
             symbol (str): 交易對名稱
-            position_type (str): 倉位類型 ("LONG"/"SHORT")
+            position_type (str): 倉位類型 ("LONG"/"SHORT") 或 ("BUY"/"SELL")
             
         Returns:
             dict: 操作結果
@@ -460,7 +445,6 @@ class BinanceFutures(AbstractFuturesAPI):
                     "symbol": str,
                     "position_type": str,
                     "position_found": bool,
-                    "quantity": str or None,
                     "orders_cancelled": bool  # 是否成功取消相關止盈止損訂單
                 },
                 "error_message": str (only when failed)
@@ -483,45 +467,28 @@ class BinanceFutures(AbstractFuturesAPI):
         try:
             symbol = self._modify_symbol_name(symbol)
             position = self.get_positions(symbol=symbol)
-            
+
+            position_type = "BUY" if position_type.upper() == "LONG" or position_type.upper() == "BUY" else "SELL"
+
             if not position or position[0]["side"] != position_type:
                 result["success"] = True  # 沒有持倉也算成功
                 result["details"]["position_found"] = False
                 self.logger.warning(f"{symbol} 無可用 {position_type} 持倉，跳過平倉操作。")
                 return result
-            
+
             result["details"]["position_found"] = True
-            
-            quantity = float(position[0]["notional"])
-            quantity = quantity if position_type == "BUY" else -quantity
-            
-            # Get symbol info to handle precision and step sizes
-            symbol_info = self.client.get_symbol_info(symbol)
-            filters = symbol_info["filters"]
-            
-            # Get precision for quantity (LOT_SIZE) and price (PRICE_FILTER)
-            step_size = next(filter for filter in filters if filter['filterType'] == 'LOT_SIZE')['stepSize']
-            
-            quantity_precision = self._get_precision_from_step(step_size)
-            
-            # 處理精度並更新到 details
-            result["details"]["quantity"] = self._truncate_to_precision(quantity, quantity_precision)
-            
-            # 使用處理後的值
-            quantity = result["details"]["quantity"]
-            
+
             # 執行平倉
-            side = "SELL" if (position_type == "long" or position_type == "BUY") else "BUY"
+            side = "SELL" if position_type == "BUY" else "BUY"
             info = self.client.futures_create_order(
                 symbol=symbol,
                 side=side,
                 type="MARKET",
-                quantity=quantity,
-                reduceOnly=True
+                closePosition=True
             )
-            
+
             result["orderId"] = info.get("orderId")
-            self.logger.info(f"{symbol} 平 {position_type} 倉成功，數量：{quantity}，訂單ID：{info.get('orderId')}")
+            self.logger.info(f"{symbol} 平 {position_type} 倉成功，訂單ID：{info.get('orderId')}")
             
         except BinanceAPIException as e:
             self.logger.error(f"{symbol} {position_type} 平倉失敗：{e}")
