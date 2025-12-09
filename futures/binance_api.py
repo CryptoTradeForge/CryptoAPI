@@ -317,9 +317,8 @@ class BinanceFutures(AbstractFuturesAPI):
             # 檢查止損止盈設置結果
             if not sl_tp_result["success"]:
                 # 止損止盈設置失敗，拋出異常讓外層處理
-                # raise Exception(f"止盈止損設置失敗: {sl_tp_result.get('error_message', 'Unknown error')}")
-                raise Exception(f"⚠️ {symbol} {position_type} 已開倉但止盈止損設置失敗: {sl_tp_result.get('error_message', 'Unknown error')}")
-           
+                raise Exception(f"⚠️ {symbol} {position_type} 止盈止損設置失敗: {sl_tp_result.get('error_message', 'Unknown error')} 請確認是否需要手動平倉。")
+            
             # 更新止損止盈價格到 details
             if stop_loss_price and "stop_loss_price" in sl_tp_result["details"]:
                 result["details"]["stop_loss_price"] = sl_tp_result["details"]["stop_loss_price"]
