@@ -39,25 +39,27 @@ class BinanceFutures(AbstractFuturesAPI):
     def __init__(self, api_key=None, api_secret=None, logger = None, env_path=".env"):
         """
         初始化 Binance Futures 交易類別
-        
+
         Args:
             api_key (str, optional): Binance API Key，若不提供則從環境變數讀取
-            api_secret (str, optional): Binance API Secret，若不提供則從環境變數讀取  
+            api_secret (str, optional): Binance API Secret，若不提供則從環境變數讀取
             logger (Logger, optional): 日誌記錄器實例，若不提供則使用預設logger
             env_path (str, optional): 環境變數文件路徑，默認為 ".env"
-            
+
         Raises:
             FileNotFoundError: 環境變數文件不存在
             ValueError: 環境變數文件格式錯誤或API憑證不完整
             PermissionError: 無法讀取環境變數文件
         """
-        
+
         if logger is None:
             self.logger = getLogger(__name__)
         else:
             self.logger = logger
-        
-        
+
+        # 追蹤已設置為 ISOLATED 模式的交易對
+        self._isolated_symbols = set()
+
         if api_key and api_secret:
             self.binance_api_key = api_key
             self.binance_api_secret = api_secret
@@ -72,21 +74,21 @@ class BinanceFutures(AbstractFuturesAPI):
             if not os.access(env_path, os.R_OK):
                 self.logger.error(f"Cannot read environment file {env_path}.")
                 raise PermissionError(f"Cannot read environment file {env_path}.")
-            
+
             self.env = load_dotenv(env_path)
             self.binance_api_key = os.getenv("BINANCE_API_KEY")
             self.binance_api_secret = os.getenv("BINANCE_API_SECRET")
-            
+
             if not self.binance_api_key or not self.binance_api_secret:
                 self.logger.error("Binance API key or secret not found in environment variables.")
                 raise ValueError("Binance API key or secret not found in environment variables.")
-        
+
         self._initialize_client()
 
     def _initialize_client(self) -> None:
         """
         初始化 Binance 客戶端
-        
+
         用從環境變數獲取的API key和secret來創建Binance客戶端實例
         """
         self.client = Client(
@@ -95,9 +97,32 @@ class BinanceFutures(AbstractFuturesAPI):
         )
         self.client.synced = True
 
-    
-    
-    
+    def _set_isolated_margin(self, symbol: str) -> None:
+        """
+        設置交易對為 ISOLATED 保證金模式（僅在首次交易時執行）
+
+        Args:
+            symbol (str): 交易對名稱
+
+        Note:
+            - 只在該交易對首次交易時設置一次
+            - 使用 _isolated_symbols 集合追蹤已設置的交易對
+            - 避免重複設置導致 5 秒冷卻期問題
+        """
+        if symbol not in self._isolated_symbols:
+            try:
+                self.client.futures_change_margin_type(symbol=symbol, marginType="ISOLATED")
+                self._isolated_symbols.add(symbol)
+                self.logger.info(f"{symbol} 已設置為 ISOLATED 保證金模式")
+            except BinanceAPIException as e:
+                if "No need to change margin type." in str(e):
+                    # 已經是 ISOLATED 模式，記錄下來避免下次再嘗試
+                    self._isolated_symbols.add(symbol)
+                    self.logger.info(f"{symbol} 已經是 ISOLATED 保證金模式")
+                else:
+                    raise e
+            print(f"{symbol} 設置為 ISOLATED 保證金模式，等待 7 秒以避免 API 請求過快...")
+            time.sleep(7)  # 避免 API 請求過快
     
     # 交易方法 --------------------------------------------------
     def set_stop_loss_take_profit(self, symbol: str, side: str, quantity: float, 
@@ -171,6 +196,9 @@ class BinanceFutures(AbstractFuturesAPI):
                 self.logger.info(f"設置 {symbol} {side} 止損單成功，止損價格：{processed_stop_loss_price}，訂單ID：{sl_info.get('orderId')}")
                 result["details"]["stop_loss_set"] = True
                 result["details"]["stop_loss_orderId"] = sl_info.get("orderId")
+                
+                if take_profit_price:
+                    time.sleep(1)  # 避免API請求過快
                 
             # 止盈單設置
             if take_profit_price:
@@ -281,14 +309,10 @@ class BinanceFutures(AbstractFuturesAPI):
             
             # 設定槓桿
             self.client.futures_change_leverage(symbol=symbol, leverage=leverage)
-            
-            # 設定保證金模式
-            try:
-                self.client.futures_change_margin_type(symbol=symbol, marginType="ISOLATED")
-            except BinanceAPIException as e:
-                if "No need to change margin type." not in str(e):
-                    raise e
-            
+
+            # 設定保證金模式（僅在首次交易時）
+            self._set_isolated_margin(symbol)
+
             # 市價開倉
             info = self.client.futures_create_order(
                 symbol=symbol,
@@ -302,13 +326,15 @@ class BinanceFutures(AbstractFuturesAPI):
             result["orderId"] = info.get("orderId")
             
             # 設置止損止盈
+            time.sleep(1)  # 等待1秒以確保倉位更新
             sl_tp_result = self.set_stop_loss_take_profit(symbol, side, float(quantity), stop_loss_price, take_profit_price)
             
             # 檢查止損止盈設置結果
             if not sl_tp_result["success"]:
                 # 止損止盈設置失敗，拋出異常讓外層處理
-                raise Exception(f"止盈止損設置失敗: {sl_tp_result.get('error_message', 'Unknown error')}")
-            
+                # raise Exception(f"止盈止損設置失敗: {sl_tp_result.get('error_message', 'Unknown error')}")
+                raise Exception(f"⚠️ {symbol} {position_type} 已開倉但止盈止損設置失敗: {sl_tp_result.get('error_message', 'Unknown error')}")
+           
             # 更新止損止盈價格到 details
             if stop_loss_price and "stop_loss_price" in sl_tp_result["details"]:
                 result["details"]["stop_loss_price"] = sl_tp_result["details"]["stop_loss_price"]
@@ -391,14 +417,10 @@ class BinanceFutures(AbstractFuturesAPI):
             
             # Set leverage
             self.client.futures_change_leverage(symbol=symbol, leverage=leverage)
-            
-            # Set margin type to ISOLATED if not already set
-            try:
-                self.client.futures_change_margin_type(symbol=symbol, marginType="ISOLATED")
-            except BinanceAPIException as e:
-                if "No need to change margin type." not in str(e):
-                    raise e
-            
+
+            # 設定保證金模式（僅在首次交易時）
+            self._set_isolated_margin(symbol)
+
             # Place the limit order
             info = self.client.futures_create_order(
                 symbol=symbol,
