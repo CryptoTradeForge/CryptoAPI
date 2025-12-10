@@ -12,6 +12,15 @@ from binance.enums import HistoricalKlinesType
 
 from .base import AbstractFuturesAPI
 
+
+# 定義用於識別止損止盈訂單的類型集合
+CLOSING_ORDER_TYPES = {
+    "STOP", "STOP_MARKET",
+    "TAKE_PROFIT", "TAKE_PROFIT_MARKET",
+    "TRAILING_STOP_MARKET"
+}
+
+
 class BinanceFutures(AbstractFuturesAPI):
     """
     Binance Futures 交易API封裝 class
@@ -178,17 +187,19 @@ class BinanceFutures(AbstractFuturesAPI):
 
                 # Determine the side for stop loss order
                 stop_side = "SELL" if side.upper() == "BUY" or side.upper() == "LONG" else "BUY"
-                sl_info = self.client.futures_create_order(
+                sl_info = self.client.futures_create_algo_order(
                     symbol=symbol,
                     side=stop_side,
                     type="STOP_MARKET",
-                    stopPrice=processed_stop_loss_price,
-                    closePosition=True
+                    triggerPrice=processed_stop_loss_price,
+                    closePosition=True,
+                    workingType='MARK_PRICE',
+                    priceProtect=False
                 )
                 # print(f"設置 {symbol} {side} 止損單成功，止損價格：{processed_stop_loss_price}")
-                self.logger.info(f"設置 {symbol} {side} 止損單成功，止損價格：{processed_stop_loss_price}，訂單ID：{sl_info.get('orderId')}")
+                self.logger.info(f"設置 {symbol} {side} 止損單成功，止損價格：{processed_stop_loss_price}，訂單ID：{sl_info.get('algoId')}")
                 result["details"]["stop_loss_set"] = True
-                result["details"]["stop_loss_orderId"] = sl_info.get("orderId")
+                result["details"]["stop_loss_algoId"] = sl_info.get("algoId")
 
             # 止盈單設置
             if take_profit_price:
@@ -199,17 +210,19 @@ class BinanceFutures(AbstractFuturesAPI):
 
                 # Determine the side for take profit order
                 tp_side = "SELL" if side.upper() == "BUY" or side.upper() == "LONG" else "BUY"
-                tp_info = self.client.futures_create_order(
+                tp_info = self.client.futures_create_algo_order(
                     symbol=symbol,
                     side=tp_side,
                     type="TAKE_PROFIT_MARKET",
-                    stopPrice=processed_take_profit_price,
-                    closePosition=True
+                    triggerPrice=processed_take_profit_price,
+                    closePosition=True,
+                    workingType='MARK_PRICE',
+                    priceProtect=False
                 )
                 # print(f"設置 {symbol} {side} 止盈單成功，止盈價格：{processed_take_profit_price}")
-                self.logger.info(f"設置 {symbol} {side} 止盈單成功，止盈價格：{processed_take_profit_price}，訂單ID：{tp_info.get('orderId')}")
+                self.logger.info(f"設置 {symbol} {side} 止盈單成功，止盈價格：{processed_take_profit_price}，訂單ID：{tp_info.get('algoId')}")
                 result["details"]["take_profit_set"] = True
-                result["details"]["take_profit_orderId"] = tp_info.get("orderId")
+                result["details"]["take_profit_algoId"] = tp_info.get("algoId")
             
             result["success"] = True
             return result
@@ -427,13 +440,13 @@ class BinanceFutures(AbstractFuturesAPI):
             return result
 
 
-    def close_position(self, symbol: str, position_type: str) -> Dict[str, Any]:
+    def close_position(self, symbol: str, position_type: Optional[str] = None) -> Dict[str, Any]:
         """
         平倉指定倉位並取消相關止盈止損條件單
         
         Args:
             symbol (str): 交易對名稱
-            position_type (str): 倉位類型 ("LONG"/"SHORT") 或 ("BUY"/"SELL")
+            position_type (str, optional): 倉位類型 ("LONG"/"SHORT") 或 ("BUY"/"SELL")，若不提供則平所有持倉
             
         Returns:
             dict: 操作結果
@@ -455,60 +468,77 @@ class BinanceFutures(AbstractFuturesAPI):
             - 若平倉後仍有其他持倉，則不會取消止盈止損訂單
         """
         result = {
-            "success": False,
-            "action": f"Close {position_type} position for {symbol}",
-            "details": {
-                "symbol": symbol,
-                "position_type": position_type
+                "success": False,
+                "action": f"Close {position_type or 'any'} position for {symbol}",
+                "details": {"symbol": symbol, "position_type": position_type}
             }
-        }
-        
+
         try:
             symbol = self._modify_symbol_name(symbol)
             position = self.get_positions(symbol=symbol)
 
-            position_type = "BUY" if position_type.upper() == "LONG" or position_type.upper() == "BUY" else "SELL"
-
-            if not position or position[0]["side"] != position_type:
-                result["success"] = True  # 沒有持倉也算成功
+            if not position or float(position[0]["positionAmt"]) == 0:
+                # 無持倉，直接返回成功
+                result["success"] = True
                 result["details"]["position_found"] = False
-                self.logger.warning(f"{symbol} 無可用 {position_type} 持倉，跳過平倉操作。")
                 return result
 
-            result["details"]["position_found"] = True
+            pos = position[0]
+            amt = float(pos["positionAmt"])
+            current_side = "BUY" if amt > 0 else "SELL"
+
+            # 判斷是否符合要平的倉位類型
+            if position_type:
+                pt = position_type.strip().upper()
+                if pt in ("LONG", "BUY") and current_side != "BUY":
+                    # 要求平多倉但當前為空倉，無需平倉
+                    result["success"] = True
+                    result["details"]["position_found"] = False
+                    return result
+                elif pt in ("SHORT", "SELL") and current_side != "SELL":
+                    # 要求平空倉但當前為多倉，無需平倉
+                    result["success"] = True
+                    result["details"]["position_found"] = False
+                    return result
+                # 其他值忽略，不影響平倉
 
             # 執行平倉
-            side = "SELL" if position_type == "BUY" else "BUY"
+            qty = abs(amt)
+            _, qty_precision = self._get_symbol_precision(symbol)
+            qty = self._truncate_to_precision(qty, qty_precision)
+
+            side = "SELL" if amt > 0 else "BUY"
+
             info = self.client.futures_create_order(
                 symbol=symbol,
                 side=side,
                 type="MARKET",
-                closePosition=True
+                quantity=qty,
+                reduceOnly=True
             )
 
             result["orderId"] = info.get("orderId")
-            self.logger.info(f"{symbol} 平 {position_type} 倉成功，訂單ID：{info.get('orderId')}")
-            
+
         except BinanceAPIException as e:
-            self.logger.error(f"{symbol} {position_type} 平倉失敗：{e}")
             result["error_message"] = str(e)
             return result
-        
+
+        # 平倉後取消止盈止損
         try:
-            # 取消相關訂單
-            if not self.get_positions(symbol=symbol):
+            new_pos = self.get_positions(symbol=symbol)
+            if not new_pos or float(new_pos[0]["positionAmt"]) == 0: # 確認已無持倉
                 self._cancel_related_orders(symbol)
                 result["details"]["orders_cancelled"] = True
             else:
-                result["details"]["orders_cancelled"] = False
-                self.logger.warning(f"{symbol} 尚有持倉，跳過取消止盈止損相關訂單操作。")
-            
+                result["details"]["orders_cancelled"] = False # 仍有持倉，不取消訂單
+
             result["success"] = True
             return result
+
         except BinanceAPIException as e:
-            self.logger.error(f"{symbol} 取消止盈止損相關訂單失敗：{e}")
             result["error_message"] = str(e)
             return result
+
     
     def cancel_order(self, symbol: str, type: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -547,10 +577,14 @@ class BinanceFutures(AbstractFuturesAPI):
             orders = self.get_open_orders(symbol=symbol, type=type)
             
             cancelled_orders = []
+            
             for order in orders:
-                self.client.futures_cancel_order(symbol=symbol, orderId=order["orderId"])
-                self.logger.info(f"取消 {symbol} {type} 訂單成功： {order['orderId']}")
-                cancelled_orders.append(order["orderId"])
+                
+                algoId = order.get("algoId")
+                orderId = order.get("orderId")
+                
+                self.client.futures_cancel_order(symbol=symbol, algoId=algoId, orderId=orderId)
+                cancelled_orders.append(algoId or orderId)
             
             result["success"] = True
             result["details"]["cancelled_orders"] = cancelled_orders
@@ -565,7 +599,7 @@ class BinanceFutures(AbstractFuturesAPI):
     
     def clean_orphan_orders(self) -> Dict[str, Any]:
         """
-        清理多餘訂單 (已觸發止損或止盈反向訂單可能會被留下)
+        清理多餘訂單 (沒有持倉卻遺留的止盈/止損類訂單)
         
         Returns:
             dict: 操作結果
@@ -586,21 +620,26 @@ class BinanceFutures(AbstractFuturesAPI):
         }
         
         try:
-            cleaned_symbols = []
+            cleaned_symbols = set()
             for order in self.get_open_orders():
-                symbol = order['symbol']
-                # 要排除 限價單
-                if order['type'] == 'LIMIT':
+                
+                od_type = order.get("type") or order.get("orderType")
+                if od_type not in CLOSING_ORDER_TYPES: # 只處理止盈止損類訂單
                     continue
                 
-                if not self.get_positions(symbol=symbol):
+                symbol = order['symbol']
+                if symbol in cleaned_symbols: # 已處理過該交易對，跳過
+                    continue
+                
+                if not self.get_positions(symbol=symbol): # 若該交易對無持倉，則取消相關訂單。若持倉存在，則不取消
                     self._cancel_related_orders(symbol)
-                    if symbol not in cleaned_symbols:
-                        cleaned_symbols.append(symbol)
+                
+                cleaned_symbols.add(symbol)
             
             result["success"] = True
             result["details"]["cleaned_symbols"] = cleaned_symbols
             result["details"]["cleaned_count"] = len(cleaned_symbols)
+            
             return result
             
         except Exception as e:
@@ -628,24 +667,23 @@ class BinanceFutures(AbstractFuturesAPI):
             Exception: 獲取持倉失敗時拋出異常
         """
         try:
-            
             positions = self.client.futures_position_information()
             symbol = self._modify_symbol_name(symbol) if symbol else None
             
-            # add "side" to each position
             for pos in positions:
-                pos["side"] = "BUY" if float(pos["positionAmt"]) > 0 else "SELL"
+                amt = float(pos["positionAmt"])
+                if amt > 0:
+                    pos["side"] = "BUY"
+                elif amt < 0:
+                    pos["side"] = "SELL"
+                else:
+                    self.logger.warning(f"{pos['symbol']} 持倉數量為 0，標記為 NONE")
+                    pos["side"] = "NONE"
             
-            if symbol:
-                    return [pos for pos in positions if pos["symbol"] == symbol]
-            else:
-                    return positions
-            
+            return [p for p in positions if symbol is None or p["symbol"] == symbol]
+        
         except BinanceAPIException as e:
-            if symbol:
-                raise Exception(f"獲取 {symbol} 持倉失敗：{e}")
-            else:
-                raise Exception(f"獲取所有持倉失敗：{e}")
+            raise Exception(f"獲取持倉失敗：{e}")
     
     def get_open_orders(self, symbol: Optional[str] = None, type: Optional[str] = None) -> List[Dict[str, Any]]:
         """
@@ -662,20 +700,21 @@ class BinanceFutures(AbstractFuturesAPI):
             Exception: 獲取訂單失敗時拋出異常
         """
         try:
-            
             if (symbol):
                 symbol = self._modify_symbol_name(symbol)
-                orders = self.client.futures_get_open_orders(symbol=symbol)
-                
-                if (type):
-                    orders = [order for order in orders if order["type"] == type]
-                return orders
-            else:
-                orders = self.client.futures_get_open_orders()
-                if (type):
-                    orders = [order for order in orders if order["type"] == type]
-                return orders
             
+            normal_orders = self.client.futures_get_open_orders(symbol=symbol)  # 當前委託
+            algo_orders = self.client.futures_get_open_algo_orders(symbol=symbol)  # 條件單
+            orders = normal_orders + algo_orders
+            
+            if (type):
+                orders = [
+                    order for order in orders
+                    if (order.get("type") or order.get("orderType")) == type
+                ]
+            
+            return orders
+
         except BinanceAPIException as e:
             if (symbol):
                 raise Exception(f"獲取 {symbol} 訂單失敗：{e}")
@@ -922,15 +961,22 @@ class BinanceFutures(AbstractFuturesAPI):
         """
         try:
             symbol = self._modify_symbol_name(symbol)
+            
             for order in self.get_open_orders(symbol=symbol) or []:
-                if (order['type'] in ['STOP_MARKET', 'TAKE_PROFIT_MARKET']):
+                
+                if order.get("type") in CLOSING_ORDER_TYPES: # 如果有 'type' 欄位，代表是一般訂單
                     self.client.futures_cancel_order(symbol=symbol, orderId=order['orderId'])
-                    # print(f"取消 {symbol} {order['type']} 訂單成功： {order['orderId']}")
                     self.logger.info(f"取消 {symbol} {order['type']} 訂單成功： {order['orderId']}")
+                
+                elif order.get("orderType") in CLOSING_ORDER_TYPES: # 如果有 'orderType' 欄位，代表是條件單
+                    self.client.futures_cancel_order(symbol=symbol, algoId=order['algoId'])
+                    self.logger.info(f"取消 {symbol} {order['orderType']} 條件單成功： {order['algoId']}")
+                
         except BinanceAPIException as e:
             # print(f"取消 {symbol} 訂單失敗：{e}")
             self.logger.error(f"取消 {symbol} 止盈止損訂單失敗：{e}")
             raise e
+
 
     def _modify_symbol_name(self, symbol: str) -> str:
         """
