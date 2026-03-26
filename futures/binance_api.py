@@ -45,7 +45,10 @@ class BinanceFutures(AbstractFuturesAPI):
         result = api.place_market_order("BTCUSDT", "LONG", 10, 100.0, stop_loss_price=95000.0)
     """
     
-    def __init__(self, api_key=None, api_secret=None, logger = None, env_path=".env"):
+    # 預設 Futures API Base URL
+    DEFAULT_FUTURES_BASE_URL = "https://fapi.binance.com/fapi"
+
+    def __init__(self, api_key=None, api_secret=None, logger=None, env_path=".env", futures_url=None):
         """
         初始化 Binance Futures 交易類別
 
@@ -54,6 +57,7 @@ class BinanceFutures(AbstractFuturesAPI):
             api_secret (str, optional): Binance API Secret，若不提供則從環境變數讀取
             logger (Logger, optional): 日誌記錄器實例，若不提供則使用預設logger
             env_path (str, optional): 環境變數文件路徑，默認為 ".env"
+            futures_url (str, optional): Futures API Base URL，若不提供則從環境變數 FUTURES_URL 讀取，fallback 到正式 API
 
         Raises:
             FileNotFoundError: 環境變數文件不存在
@@ -68,6 +72,9 @@ class BinanceFutures(AbstractFuturesAPI):
 
         # 追蹤已設置為 ISOLATED 模式的交易對
         self._isolated_symbols = set()
+
+        # 精度快取
+        self._precision_cache = {}
 
         if api_key and api_secret:
             self.binance_api_key = api_key
@@ -92,18 +99,30 @@ class BinanceFutures(AbstractFuturesAPI):
                 self.logger.error("Binance API key or secret not found in environment variables.")
                 raise ValueError("Binance API key or secret not found in environment variables.")
 
+        # 設定 Futures API Base URL
+        self.futures_base_url = futures_url or os.getenv("FUTURES_URL") or self.DEFAULT_FUTURES_BASE_URL
+
         self._initialize_client()
 
     def _initialize_client(self) -> None:
         """
         初始化 Binance 客戶端
 
-        用從環境變數獲取的API key和secret來創建Binance客戶端實例
+        用從環境變數獲取的API key和secret來創建Binance客戶端實例。
+        若設定了自訂 FUTURES_URL，會覆寫 client 的 Futures API 端點。
         """
+        kwargs = {}
+        if self.futures_base_url != self.DEFAULT_FUTURES_BASE_URL:
+            kwargs["testnet"] = True
+            self.logger.info(f"使用自訂 Futures URL: {self.futures_base_url}")
+
         self.client = Client(
             api_key=self.binance_api_key,
             api_secret=self.binance_api_secret,
+            **kwargs
         )
+        if self.futures_base_url != self.DEFAULT_FUTURES_BASE_URL:
+            self.client.FUTURES_URL = self.futures_base_url
         self.client.synced = True
 
     def _set_isolated_margin(self, symbol: str) -> None:
@@ -123,6 +142,7 @@ class BinanceFutures(AbstractFuturesAPI):
                 self.client.futures_change_margin_type(symbol=symbol, marginType="ISOLATED")
                 self._isolated_symbols.add(symbol)
                 self.logger.info(f"{symbol} 已設置為 ISOLATED 保證金模式")
+                time.sleep(7)  # 模式變更後等待冷卻（官方 5 秒冷卻 + 緩衝）
             except BinanceAPIException as e:
                 if "No need to change margin type." in str(e):
                     # 已經是 ISOLATED 模式，記錄下來避免下次再嘗試
@@ -130,8 +150,6 @@ class BinanceFutures(AbstractFuturesAPI):
                     self.logger.info(f"{symbol} 已經是 ISOLATED 保證金模式")
                 else:
                     raise e
-            print(f"{symbol} 設置為 ISOLATED 保證金模式，等待 7 秒以避免 API 請求過快...")
-            time.sleep(7)  # 避免 API 請求過快
     
     # 交易方法 --------------------------------------------------
     def set_stop_loss_take_profit(self, symbol: str, side: str,
@@ -1019,15 +1037,17 @@ class BinanceFutures(AbstractFuturesAPI):
 
     def _get_symbol_precision(self, symbol: str) -> Tuple[int, int]:
         """
-        獲取交易對的價格和數量精度
-        
+        獲取交易對的價格和數量精度（帶快取）
+
         Args:
             symbol (str): 交易對名稱
-            
+
         Returns:
             tuple: (價格精度, 數量精度)
         """
-        
+        if symbol in self._precision_cache:
+            return self._precision_cache[symbol]
+
         all_symbols_info = self.client.futures_exchange_info()["symbols"]
         symbol_info = next((s for s in all_symbols_info if s['symbol'] == symbol), None)
         
@@ -1041,7 +1061,8 @@ class BinanceFutures(AbstractFuturesAPI):
         
         price_precision = self._get_precision_from_step(tick_size)
         quantity_precision = self._get_precision_from_step(step_size)
-        
+
+        self._precision_cache[symbol] = (price_precision, quantity_precision)
         return price_precision, quantity_precision
     
     
@@ -1069,29 +1090,27 @@ class BinanceFutures(AbstractFuturesAPI):
             "symbol": symbol,
             "interval": interval
         }
-        
+
         if limit:
             params["limit"] = limit
         if start_str:
             params["startTime"] = start_str
-        
-        response = requests.get(
-            f"https://fapi.binance.com/fapi/v1/klines",
-            params=params
-        )
-        
-        if response.status_code == 200:
-            return response.json()
-        elif response.status_code == 429:
-            retry_after = int(response.headers.get("retry-after", "1")) + 1
-            self.logger.warning(f"Rate limit exceeded when fetching klines for {symbol}. Retrying after {retry_after} seconds.")
-            time.sleep(retry_after)
-            return self._get_historical_klines_with_rate_limit(
-                symbol,
-                interval,
-                limit,
-                start_str
+
+        max_retries = 5
+        for attempt in range(max_retries):
+            response = requests.get(
+                f"{self.futures_base_url}/v1/klines",
+                params=params
             )
-        else:
-            self.logger.error(f"Failed to fetch klines for {symbol}. Status code: {response.status_code}, Response: {response.text}")
-            raise Exception(f"Failed to fetch klines for {symbol}. Status code: {response.status_code}")
+
+            if response.status_code == 200:
+                return response.json()
+            elif response.status_code == 429:
+                retry_after = int(response.headers.get("retry-after", "1")) + 1
+                self.logger.warning(f"Rate limit exceeded when fetching klines for {symbol}. Retrying after {retry_after} seconds. (attempt {attempt + 1}/{max_retries})")
+                time.sleep(retry_after)
+            else:
+                self.logger.error(f"Failed to fetch klines for {symbol}. Status code: {response.status_code}, Response: {response.text}")
+                raise Exception(f"Failed to fetch klines for {symbol}. Status code: {response.status_code}")
+
+        raise Exception(f"Failed to fetch klines for {symbol} after {max_retries} retries due to rate limiting.")
