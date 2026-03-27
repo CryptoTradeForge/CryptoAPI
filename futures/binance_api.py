@@ -80,7 +80,7 @@ class BinanceFutures(AbstractFuturesAPI):
             self.binance_api_key = api_key
             self.binance_api_secret = api_secret
         else:
-            self.logger.warning("No Binance API key or secret provided. Using environment variables.")
+            self.logger.debug("No Binance API key or secret provided. Using environment variables.")
             if not os.path.exists(env_path):
                 self.logger.error(f"Environment file {env_path} not found.")
                 raise FileNotFoundError(f"Environment file {env_path} not found.")
@@ -246,12 +246,16 @@ class BinanceFutures(AbstractFuturesAPI):
             return result
                 
         except BinanceAPIException as e:
-            # print(f"{symbol} {side} 設置止損止盈單失敗：{e}")
             self.logger.error(f"{symbol} {side} 設置止損止盈單失敗：{e}")
             result["error_message"] = str(e)
-            
-            # 平倉
-            self.close_position(symbol, "BUY" if side.upper() == "BUY" or side.upper() == "LONG" else "SELL")
+
+            # -4130 = 已有同方向的 GTE closePosition 止損/止盈單，不需要平倉
+            # 只有在非 -4130 錯誤時才平倉（真正的止損設定失敗 = 裸倉風險）
+            if "-4130" not in str(e):
+                self.logger.warning(f"{symbol} {side} 止損設定失敗且非重複訂單錯誤，執行安全平倉")
+                self.close_position(symbol, "BUY" if side.upper() == "BUY" or side.upper() == "LONG" else "SELL")
+            else:
+                self.logger.info(f"{symbol} {side} 已有 GTE 止損/止盈單，無需重複設定")
             return result
 
 
