@@ -218,6 +218,7 @@ class BinanceFutures(AbstractFuturesAPI):
                 self.logger.info(f"設置 {symbol} {side} 止損單成功，止損價格：{processed_stop_loss_price}，訂單ID：{sl_info.get('algoId')}")
                 result["details"]["stop_loss_set"] = True
                 result["details"]["stop_loss_algoId"] = sl_info.get("algoId")
+                result["details"]["stop_loss_raw_response"] = sl_info
 
             # 止盈單設置
             if take_profit_price:
@@ -241,6 +242,7 @@ class BinanceFutures(AbstractFuturesAPI):
                 self.logger.info(f"設置 {symbol} {side} 止盈單成功，止盈價格：{processed_take_profit_price}，訂單ID：{tp_info.get('algoId')}")
                 result["details"]["take_profit_set"] = True
                 result["details"]["take_profit_algoId"] = tp_info.get("algoId")
+                result["details"]["take_profit_raw_response"] = tp_info
             
             result["success"] = True
             return result
@@ -345,6 +347,7 @@ class BinanceFutures(AbstractFuturesAPI):
             # print(f"開 {position_type} 倉成功，數量：{quantity}，價格：{price}")
             self.logger.info(f"{symbol} 開 {position_type} 市價單成功，數量：{quantity}，價格：{price}，訂單ID：{info.get('orderId')}")
             result["orderId"] = info.get("orderId")
+            result["raw_response"] = info
             
             # 設置止損止盈
             sl_tp_result = self.set_stop_loss_take_profit(symbol, side, stop_loss_price, take_profit_price)
@@ -540,6 +543,7 @@ class BinanceFutures(AbstractFuturesAPI):
             )
 
             result["orderId"] = info.get("orderId")
+            result["raw_response"] = info
 
         except BinanceAPIException as e:
             result["error_message"] = str(e)
