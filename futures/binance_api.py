@@ -345,7 +345,21 @@ class BinanceFutures(AbstractFuturesAPI):
             )
 
             # 從 API response 取成交均價
-            avg_price = float(info.get('avgPrice', price))
+            avg_price = float(info.get('avgPrice', 0))
+            if avg_price <= 0:
+                # avgPrice 常為 0，改從持倉查詢真實入場均價
+                try:
+                    import time
+                    time.sleep(0.3)  # 等 Binance 結算
+                    pos_list = self.client.futures_position_information(symbol=symbol)
+                    for pos in pos_list:
+                        if float(pos.get('positionAmt', 0)) != 0:
+                            avg_price = float(pos['entryPrice'])
+                            break
+                except Exception:
+                    pass
+            if avg_price <= 0:
+                avg_price = float(result["details"]["price"])  # 最終 fallback
             result["details"]["price"] = avg_price
 
             # print(f"開 {position_type} 倉成功，數量：{quantity}，價格：{avg_price}")
