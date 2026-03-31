@@ -343,9 +343,13 @@ class BinanceFutures(AbstractFuturesAPI):
                 type="MARKET",
                 quantity=quantity
             )
-            
-            # print(f"開 {position_type} 倉成功，數量：{quantity}，價格：{price}")
-            self.logger.info(f"{symbol} 開 {position_type} 市價單成功，數量：{quantity}，價格：{price}，訂單ID：{info.get('orderId')}")
+
+            # 從 API response 取成交均價
+            avg_price = float(info.get('avgPrice', price))
+            result["details"]["price"] = avg_price
+
+            # print(f"開 {position_type} 倉成功，數量：{quantity}，價格：{avg_price}")
+            self.logger.info(f"{symbol} 開 {position_type} 市價單成功，數量：{quantity}，成交均價：{avg_price}，訂單ID：{info.get('orderId')}")
             result["orderId"] = info.get("orderId")
             result["raw_response"] = info
             
@@ -541,6 +545,10 @@ class BinanceFutures(AbstractFuturesAPI):
                 quantity=qty,
                 reduceOnly=True
             )
+
+            # 從 API response 取成交均價
+            avg_price = float(info.get('avgPrice', 0))
+            result["details"]["exit_price"] = avg_price
 
             result["orderId"] = info.get("orderId")
             result["raw_response"] = info
