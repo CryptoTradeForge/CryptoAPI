@@ -840,6 +840,30 @@ class BinanceFutures(AbstractFuturesAPI):
         }
         return symbol in valid_futures
 
+    def get_max_leverage(self, symbol: str) -> int:
+        """
+        查詢交易對的最大允許槓桿
+
+        Args:
+            symbol (str): 交易對名稱
+
+        Returns:
+            int: 第一個 leverage bracket 的 initialLeverage；查詢失敗時返回 20
+        """
+        try:
+            symbol = self._modify_symbol_name(symbol)
+            leverage_brackets = self.client.futures_leverage_bracket(symbol=symbol)
+
+            if not leverage_brackets:
+                return 20
+
+            first_symbol_bracket = leverage_brackets[0]
+            first_bracket = first_symbol_bracket.get("brackets", [{}])[0]
+            return int(first_bracket.get("initialLeverage", 20))
+
+        except Exception:
+            return 20
+
 
     def get_historical_data(
             self,

@@ -202,6 +202,19 @@ class AbstractFuturesAPI(ABC):
         pass
 
     @abstractmethod
+    def get_max_leverage(self, symbol: str) -> int:
+        """
+        查詢交易對可用的最大允許槓桿
+
+        Args:
+            symbol (str): 交易對名稱
+
+        Returns:
+            int: 第一個 leverage bracket 的最大槓桿；查詢失敗時應由實作返回預設值
+        """
+        pass
+
+    @abstractmethod
     def get_historical_data(self, symbol: str, interval: str, limit: Optional[int] = None, 
                            closed: bool = True, show: bool = False, 
                            since: Optional[int] = None) -> List[List[Any]]:
