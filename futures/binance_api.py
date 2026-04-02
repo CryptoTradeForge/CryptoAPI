@@ -330,8 +330,34 @@ class BinanceFutures(AbstractFuturesAPI):
             quantity = result["details"]["quantity"]
             price = result["details"]["price"]
             
-            # 設定槓桿
-            self.client.futures_change_leverage(symbol=symbol, leverage=leverage)
+            # 設定槓桿（處理帳戶限制）
+            leverage_set = False
+            actual_leverage = leverage
+            for try_lev in [leverage, 5, 3, 2, 1]:
+                try:
+                    self.client.futures_change_leverage(symbol=symbol, leverage=try_lev)
+                    if try_lev != leverage:
+                        self.logger.warning(f"⚠️ {symbol} 槓桿限制，降至 {try_lev}x（原目標 {leverage}x）")
+                    actual_leverage = try_lev
+                    leverage_set = True
+                    break
+                except Exception as e:
+                    if '-4424' in str(e) or 'leverage' in str(e).lower():
+                        continue  # 嘗試更低槓桿
+                    else:
+                        raise  # 其他錯誤直接拋出
+
+            if not leverage_set:
+                raise Exception(f"無法為 {symbol} 設定任何槓桿（嘗試了 {leverage}x 到 1x）")
+
+            # 重新計算 amount 基於實際槓桿（如果實際槓桿不同）
+            if actual_leverage != leverage:
+                # 根據實際槓桿調整名義價值
+                amount = (amount / leverage) * actual_leverage
+                quantity = amount / price
+                price_precision, quantity_precision = self._get_symbol_precision(symbol)
+                result["details"]["quantity"] = self._truncate_to_precision(quantity, quantity_precision)
+                quantity = result["details"]["quantity"]
 
             # 設定保證金模式（僅在首次交易時）
             self._set_isolated_margin(symbol)
@@ -366,7 +392,10 @@ class BinanceFutures(AbstractFuturesAPI):
             self.logger.info(f"{symbol} 開 {position_type} 市價單成功，數量：{quantity}，成交均價：{avg_price}，訂單ID：{info.get('orderId')}")
             result["orderId"] = info.get("orderId")
             result["raw_response"] = info
-            
+
+            # 更新實際設定的槓桿到結果
+            result["details"]["leverage"] = actual_leverage
+
             # 設置止損止盈
             sl_tp_result = self.set_stop_loss_take_profit(symbol, side, stop_loss_price, take_profit_price)
             
@@ -455,8 +484,34 @@ class BinanceFutures(AbstractFuturesAPI):
             quantity = result["details"]["quantity"]
             price = result["details"]["price"]
             
-            # Set leverage
-            self.client.futures_change_leverage(symbol=symbol, leverage=leverage)
+            # Set leverage（處理帳戶限制）
+            leverage_set = False
+            actual_leverage = leverage
+            for try_lev in [leverage, 5, 3, 2, 1]:
+                try:
+                    self.client.futures_change_leverage(symbol=symbol, leverage=try_lev)
+                    if try_lev != leverage:
+                        self.logger.warning(f"⚠️ {symbol} 槓桿限制，降至 {try_lev}x（原目標 {leverage}x）")
+                    actual_leverage = try_lev
+                    leverage_set = True
+                    break
+                except Exception as e:
+                    if '-4424' in str(e) or 'leverage' in str(e).lower():
+                        continue  # 嘗試更低槓桿
+                    else:
+                        raise  # 其他錯誤直接拋出
+
+            if not leverage_set:
+                raise Exception(f"無法為 {symbol} 設定任何槓桿（嘗試了 {leverage}x 到 1x）")
+
+            # 重新計算 amount 基於實際槓桿（如果實際槓桿不同）
+            if actual_leverage != leverage:
+                # 根據實際槓桿調整名義價值
+                amount = (amount / leverage) * actual_leverage
+                quantity = amount / price
+                price_precision, quantity_precision = self._get_symbol_precision(symbol)
+                result["details"]["quantity"] = self._truncate_to_precision(quantity, quantity_precision)
+                quantity = result["details"]["quantity"]
 
             # 設定保證金模式（僅在首次交易時）
             self._set_isolated_margin(symbol)
@@ -472,8 +527,10 @@ class BinanceFutures(AbstractFuturesAPI):
             )
             
             self.logger.info(f"{symbol} 開 {position_type} 限價單成功，數量：{quantity}，價格：{price}，訂單ID：{info.get('orderId')}")
-            
+
             result["orderId"] = info.get("orderId")
+            # 更新實際設定的槓桿到結果
+            result["details"]["leverage"] = actual_leverage
             result["success"] = True
             return result
             
