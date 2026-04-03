@@ -354,7 +354,7 @@ class BinanceFutures(AbstractFuturesAPI):
             if actual_leverage != leverage:
                 # 根據實際槓桿調整名義價值
                 amount = (amount / leverage) * actual_leverage
-                quantity = amount / price
+                quantity = amount / float(price)
                 price_precision, quantity_precision = self._get_symbol_precision(symbol)
                 result["details"]["quantity"] = self._truncate_to_precision(quantity, quantity_precision)
                 quantity = result["details"]["quantity"]
@@ -508,7 +508,7 @@ class BinanceFutures(AbstractFuturesAPI):
             if actual_leverage != leverage:
                 # 根據實際槓桿調整名義價值
                 amount = (amount / leverage) * actual_leverage
-                quantity = amount / price
+                quantity = amount / float(price)
                 price_precision, quantity_precision = self._get_symbol_precision(symbol)
                 result["details"]["quantity"] = self._truncate_to_precision(quantity, quantity_precision)
                 quantity = result["details"]["quantity"]
