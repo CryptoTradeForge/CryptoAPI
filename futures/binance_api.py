@@ -48,7 +48,7 @@ class BinanceFutures(AbstractFuturesAPI):
     # 預設 Futures API Base URL
     DEFAULT_FUTURES_BASE_URL = "https://fapi.binance.com/fapi"
 
-    def __init__(self, api_key=None, api_secret=None, logger=None, env_path=".env", futures_url=None):
+    def __init__(self, api_key=None, api_secret=None, logger=None, env_path=".env", futures_url=None, public_only=False):
         """
         初始化 Binance Futures 交易類別
 
@@ -58,9 +58,10 @@ class BinanceFutures(AbstractFuturesAPI):
             logger (Logger, optional): 日誌記錄器實例，若不提供則使用預設logger
             env_path (str, optional): 環境變數文件路徑，默認為 ".env"
             futures_url (str, optional): Futures API Base URL，若不提供則從環境變數 FUTURES_URL 讀取，fallback 到正式 API
+            public_only (bool, optional): 僅使用公開 API（K 線、OI、費率等），不需要 API Key
 
         Raises:
-            FileNotFoundError: 環境變數文件不存在
+            FileNotFoundError: 環境變數文件不存在（非 public_only 模式）
             ValueError: 環境變數文件格式錯誤或API憑證不完整
             PermissionError: 無法讀取環境變數文件
         """
@@ -76,9 +77,17 @@ class BinanceFutures(AbstractFuturesAPI):
         # 精度快取
         self._precision_cache = {}
 
+        # 公開模式標記
+        self._public_only = public_only
+
         if api_key and api_secret:
             self.binance_api_key = api_key
             self.binance_api_secret = api_secret
+        elif public_only:
+            # 公開模式：不需要 API Key，用空字串初始化（K 線等公開 API 不需要認證）
+            self.binance_api_key = ""
+            self.binance_api_secret = ""
+            self.logger.debug("Public-only mode: no API key required.")
         else:
             self.logger.debug("No Binance API key or secret provided. Using environment variables.")
             if not os.path.exists(env_path):
@@ -124,6 +133,11 @@ class BinanceFutures(AbstractFuturesAPI):
         if self.futures_base_url != self.DEFAULT_FUTURES_BASE_URL:
             self.client.FUTURES_URL = self.futures_base_url
         self.client.synced = True
+
+    def _require_auth(self, method_name: str):
+        """檢查是否在 public_only 模式下呼叫需要認證的方法"""
+        if self._public_only:
+            raise PermissionError(f"Cannot call {method_name}() in public_only mode. API key required.")
 
     def _set_isolated_margin(self, symbol: str) -> None:
         """
@@ -180,6 +194,7 @@ class BinanceFutures(AbstractFuturesAPI):
                 "error_message": str (only when failed)
             }
         """
+        self._require_auth("set_stop_loss_take_profit")
         symbol = self._modify_symbol_name(symbol)
         result = {
             "success": False,
@@ -298,6 +313,7 @@ class BinanceFutures(AbstractFuturesAPI):
             - 若提供止損/止盈價格，會在開倉成功後自動設置相關條件單
             - 若止損/止盈設置失敗，會自動平倉並返回錯誤
         """
+        self._require_auth("place_market_order")
         result = {
             "success": False,
             "action": f"Place market {position_type} order for {symbol}",
@@ -567,6 +583,7 @@ class BinanceFutures(AbstractFuturesAPI):
             - 只有在完全沒有該symbol持倉時才會取消止盈止損相關訂單
             - 若平倉後仍有其他持倉，則不會取消止盈止損訂單
         """
+        self._require_auth("close_position")
         result = {
                 "success": False,
                 "action": f"Close {position_type or 'any'} position for {symbol}",
@@ -771,6 +788,7 @@ class BinanceFutures(AbstractFuturesAPI):
         Raises:
             Exception: 獲取持倉失敗時拋出異常
         """
+        self._require_auth("get_positions")
         try:
             positions = self.client.futures_position_information()
             symbol = self._modify_symbol_name(symbol) if symbol else None
@@ -841,8 +859,9 @@ class BinanceFutures(AbstractFuturesAPI):
         Raises:
             Exception: 獲取USDT餘額失敗時拋出異常
         """
+        self._require_auth("fetch_usdt_balance")
         try:
-            
+
             account_info = self.client.futures_account()
             for asset in account_info["assets"]:
                 if (asset["asset"] == "USDT"):
