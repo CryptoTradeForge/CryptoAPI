@@ -266,13 +266,14 @@ class BinanceFutures(AbstractFuturesAPI):
             self.logger.error(f"{symbol} {side} 設置止損止盈單失敗：{e}")
             result["error_message"] = str(e)
 
-            # -4130 = 已有同方向的 GTE closePosition 止損/止盈單，不需要平倉
-            # 只有在非 -4130 錯誤時才平倉（真正的止損設定失敗 = 裸倉風險）
+            # 所有錯誤都要明確報錯，不靜默跳過
             if "-4130" not in str(e):
+                # 非 -4130：真正的設定失敗，裸倉風險，安全平倉
                 self.logger.warning(f"{symbol} {side} 止損設定失敗且非重複訂單錯誤，執行安全平倉")
                 self.close_position(symbol, "BUY" if side.upper() == "BUY" or side.upper() == "LONG" else "SELL")
             else:
-                self.logger.info(f"{symbol} {side} 已有 GTE 止損/止盈單，無需重複設定")
+                # -4130：已有同方向訂單，設定失敗。呼叫方需先取消舊單再重設
+                self.logger.error(f"{symbol} {side} 已有 GTE 止損/止盈單（-4130），設定失敗！需先取消舊單")
             return result
 
 
