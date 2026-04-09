@@ -268,8 +268,196 @@ class BinanceFutures(AbstractFuturesAPI):
             raise
 
 
-    def place_market_order(self, symbol: str, position_type: str, leverage: int, amount: float, 
-                          stop_loss_price: Optional[float] = None, 
+    def adjust_tp_sl(self, symbol: str,
+                     stop_loss_price: Optional[float] = None,
+                     take_profit_price: Optional[float] = None) -> Dict[str, Any]:
+        """
+        調整現有持倉的止損和/或止盈價格
+
+        只更新有傳入的參數：只傳 SL 就只改 SL，只傳 TP 就只改 TP，兩個都傳就兩個都改。
+        不傳的那個保持原樣不動。
+
+        Args:
+            symbol (str): 交易對名稱
+            stop_loss_price (float, optional): 新的止損價格
+            take_profit_price (float, optional): 新的止盈價格
+
+        Returns:
+            dict: 操作結果
+            {
+                "success": bool,
+                "action": str,
+                "details": {
+                    "symbol": str,
+                    "side": str,
+                    "stop_loss_updated": bool,
+                    "stop_loss_price": str or None,
+                    "take_profit_updated": bool,
+                    "take_profit_price": str or None,
+                    "stop_loss_cancelled": bool,
+                    "take_profit_cancelled": bool
+                },
+                "error_message": str (only when failed)
+            }
+
+        Raises:
+            ValueError: 倉位不存在、未傳入任何價格、或價格會立即觸發
+        """
+        self._require_auth("adjust_tp_sl")
+        symbol = self._modify_symbol_name(symbol)
+
+        if stop_loss_price is None and take_profit_price is None:
+            raise ValueError("至少需要傳入 stop_loss_price 或 take_profit_price 其中之一")
+
+        result = {
+            "success": False,
+            "action": f"Adjust TP/SL for {symbol}",
+            "details": {
+                "symbol": symbol,
+                "stop_loss_updated": False,
+                "stop_loss_price": None,
+                "take_profit_updated": False,
+                "take_profit_price": None,
+                "stop_loss_cancelled": False,
+                "take_profit_cancelled": False,
+            }
+        }
+
+        # 1. 檢查倉位存在
+        positions = self.get_positions(symbol=symbol)
+        active = [p for p in positions if float(p.get('positionAmt', 0)) != 0]
+        if not active:
+            raise ValueError(f"{symbol} 沒有持倉，無法調整 TP/SL")
+
+        pos = active[0]
+        amt = float(pos['positionAmt'])
+        side = pos['side']  # BUY or SELL
+        result["details"]["side"] = side
+        is_short = (amt < 0)
+
+        # 取得當前 mark price
+        mark_price = float(pos.get('markPrice', 0))
+        if mark_price <= 0:
+            mark_price = self.get_price(symbol)
+
+        # 安全距離：0.05%（避免立即觸發，但允許 breakeven SL 等接近入場的設定）
+        min_distance_pct = 0.0005
+
+        # 2. 驗證 SL 價格合理性
+        if stop_loss_price is not None:
+            if is_short:
+                # SHORT 的 SL 必須在 mark price 上方
+                min_sl = mark_price * (1 + min_distance_pct)
+                if stop_loss_price <= min_sl:
+                    raise ValueError(
+                        f"{symbol} SHORT SL={stop_loss_price:.8f} 太接近或低於現價 {mark_price:.8f}（需 > {min_sl:.8f}），會立即觸發"
+                    )
+            else:
+                # LONG 的 SL 必須在 mark price 下方
+                max_sl = mark_price * (1 - min_distance_pct)
+                if stop_loss_price >= max_sl:
+                    raise ValueError(
+                        f"{symbol} LONG SL={stop_loss_price:.8f} 太接近或高於現價 {mark_price:.8f}（需 < {max_sl:.8f}），會立即觸發"
+                    )
+
+        # 3. 驗證 TP 價格合理性
+        if take_profit_price is not None:
+            if is_short:
+                # SHORT 的 TP 必須在 mark price 下方
+                max_tp = mark_price * (1 - min_distance_pct)
+                if take_profit_price >= max_tp:
+                    raise ValueError(
+                        f"{symbol} SHORT TP={take_profit_price:.8f} 太接近或高於現價 {mark_price:.8f}（需 < {max_tp:.8f}），會立即觸發"
+                    )
+            else:
+                # LONG 的 TP 必須在 mark price 上方
+                min_tp = mark_price * (1 + min_distance_pct)
+                if take_profit_price <= min_tp:
+                    raise ValueError(
+                        f"{symbol} LONG TP={take_profit_price:.8f} 太接近或低於現價 {mark_price:.8f}（需 > {min_tp:.8f}），會立即觸發"
+                    )
+
+        try:
+            price_precision, _ = self._get_symbol_precision(symbol)
+            # 平倉方向：SHORT 用 BUY 平，LONG 用 SELL 平
+            close_side = "BUY" if is_short else "SELL"
+
+            # 取得現有 orders 分類
+            existing_orders = self.get_open_orders(symbol=symbol)
+            existing_sl = [o for o in existing_orders
+                           if ('STOP' in (o.get('orderType') or o.get('type') or ''))
+                           and 'TAKE_PROFIT' not in (o.get('orderType') or o.get('type') or '')]
+            existing_tp = [o for o in existing_orders
+                           if 'TAKE_PROFIT' in (o.get('orderType') or o.get('type') or '')]
+
+            # 4. 處理 SL
+            if stop_loss_price is not None:
+                processed_sl = self._truncate_to_precision(stop_loss_price, price_precision)
+                result["details"]["stop_loss_price"] = processed_sl
+
+                # 取消現有 SL
+                for o in existing_sl:
+                    algo_id = o.get("algoId")
+                    order_id = o.get("orderId")
+                    try:
+                        self.client.futures_cancel_order(symbol=symbol, algoId=algo_id, orderId=order_id)
+                        result["details"]["stop_loss_cancelled"] = True
+                    except Exception as e:
+                        self.logger.warning(f"{symbol} 取消舊 SL 失敗: {e}")
+
+                # 設新 SL
+                sl_info = self.client.futures_create_algo_order(
+                    symbol=symbol,
+                    side=close_side,
+                    type="STOP_MARKET",
+                    triggerPrice=processed_sl,
+                    closePosition=True,
+                    workingType='MARK_PRICE',
+                    priceProtect=False
+                )
+                result["details"]["stop_loss_updated"] = True
+                result["details"]["stop_loss_algoId"] = sl_info.get("algoId")
+                self.logger.info(f"{symbol} SL 調整為 {processed_sl}")
+
+            # 5. 處理 TP
+            if take_profit_price is not None:
+                processed_tp = self._truncate_to_precision(take_profit_price, price_precision)
+                result["details"]["take_profit_price"] = processed_tp
+
+                # 取消現有 TP
+                for o in existing_tp:
+                    algo_id = o.get("algoId")
+                    order_id = o.get("orderId")
+                    try:
+                        self.client.futures_cancel_order(symbol=symbol, algoId=algo_id, orderId=order_id)
+                        result["details"]["take_profit_cancelled"] = True
+                    except Exception as e:
+                        self.logger.warning(f"{symbol} 取消舊 TP 失敗: {e}")
+
+                # 設新 TP
+                tp_info = self.client.futures_create_algo_order(
+                    symbol=symbol,
+                    side=close_side,
+                    type="TAKE_PROFIT_MARKET",
+                    triggerPrice=processed_tp,
+                    closePosition=True,
+                    workingType='MARK_PRICE',
+                    priceProtect=False
+                )
+                result["details"]["take_profit_updated"] = True
+                result["details"]["take_profit_algoId"] = tp_info.get("algoId")
+                self.logger.info(f"{symbol} TP 調整為 {processed_tp}")
+
+            result["success"] = True
+            return result
+
+        except BinanceAPIException as e:
+            self.logger.error(f"{symbol} 調整 TP/SL 失敗：{e}")
+            result["error_message"] = str(e)
+            raise
+
+    def place_market_order(self, symbol: str, position_type: str, leverage: int, amount: float,
+                          stop_loss_price: Optional[float] = None,
                           take_profit_price: Optional[float] = None) -> Dict[str, Any]:
         """
         市價開倉交易
