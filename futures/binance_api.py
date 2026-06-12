@@ -1096,6 +1096,153 @@ class BinanceFutures(AbstractFuturesAPI):
         }
         return symbol in valid_futures
 
+    def get_24hr_tickers(self, symbol: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        獲取永續合約 24 小時行情統計（公開資料，不需 API Key）
+
+        Args:
+            symbol (str, optional): 交易對名稱，若不指定則回傳全部交易對
+
+        Returns:
+            list: 每個元素為 dict，常用欄位包含：
+                - symbol: 交易對
+                - lastPrice: 最新價
+                - volume: 24h 成交量（以 base asset 計）
+                - quoteVolume: 24h 成交額（以 quote asset / USDT 計）<- 用此欄位做成交量過濾
+                - priceChangePercent: 24h 漲跌幅 (%)
+
+        Raises:
+            Exception: 取得失敗時拋出異常
+
+        Note:
+            - 直接打公開端點 /fapi/v1/ticker/24hr，public_only 模式亦可使用
+            - 不帶 symbol 時 Binance 回傳 list；帶 symbol 時回傳單一 dict，這裡統一成 list
+        """
+        params = {}
+        if symbol:
+            params["symbol"] = self._modify_symbol_name(symbol)
+
+        try:
+            response = requests.get(f"{self.futures_base_url}/v1/ticker/24hr", params=params, timeout=15)
+            response.raise_for_status()
+            data = response.json()
+            return data if isinstance(data, list) else [data]
+        except requests.RequestException as e:
+            raise Exception(f"獲取 24hr ticker 失敗：{e}")
+
+    def get_funding_rate_history(self, symbol: str, since: Optional[int] = None,
+                                 limit: int = 1000) -> List[Dict[str, Any]]:
+        """
+        獲取永續合約資金費率(funding rate)歷史（公開資料，不需 API Key）。
+
+        Args:
+            symbol (str): 交易對名稱
+            since (int, optional): 起始時間戳（毫秒）；提供時自動分頁抓到最新
+            limit (int): 單次上限（Binance max 1000）
+
+        Returns:
+            list: 每筆 {symbol, fundingTime(ms), fundingRate(str), markPrice}
+                  funding 通常每 8 小時結算一次（部分幣 4 小時）。
+
+        Note:
+            - 打公開端點 /fapi/v1/fundingRate，自動處理分頁與 rate limit。
+        """
+        symbol = self._modify_symbol_name(symbol)
+        all_rows: List[Dict[str, Any]] = []
+        start_time = since
+
+        while True:
+            params = {"symbol": symbol, "limit": min(1000, limit)}
+            if start_time is not None:
+                params["startTime"] = start_time
+
+            for attempt in range(5):
+                resp = requests.get(f"{self.futures_base_url}/v1/fundingRate", params=params, timeout=15)
+                if resp.status_code == 200:
+                    break
+                if resp.status_code == 429:
+                    wait = int(resp.headers.get("retry-after", "1")) + 1
+                    self.logger.warning(f"Rate limit on fundingRate {symbol}, retry in {wait}s")
+                    time.sleep(wait)
+                else:
+                    raise Exception(f"獲取 {symbol} funding 失敗：{resp.status_code} {resp.text}")
+            else:
+                raise Exception(f"獲取 {symbol} funding 失敗：rate limit 重試耗盡")
+
+            batch = resp.json()
+            if not batch:
+                break
+            all_rows.extend(batch)
+
+            if since is None or len(batch) < params["limit"]:
+                break
+            start_time = batch[-1]["fundingTime"] + 1  # 下一頁
+
+        return all_rows
+
+    def _futures_data_get(self, path: str, params: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """打 /futures/data/ 端點（OI、多空比等；公開，僅主網，通常只保留近 ~30 天）。"""
+        data_base = self.futures_base_url.rsplit("/fapi", 1)[0]  # -> https://fapi.binance.com
+        for attempt in range(5):
+            resp = requests.get(f"{data_base}/futures/data/{path}", params=params, timeout=15)
+            if resp.status_code == 200:
+                return resp.json()
+            if resp.status_code == 429:
+                time.sleep(int(resp.headers.get("retry-after", "1")) + 1)
+            else:
+                raise Exception(f"futures/data/{path} 失敗：{resp.status_code} {resp.text}")
+        raise Exception(f"futures/data/{path} rate limit 重試耗盡")
+
+    def get_open_interest_hist(self, symbol: str, period: str = "1d",
+                               limit: int = 500) -> List[Dict[str, Any]]:
+        """
+        未平倉量(Open Interest)歷史。注意 Binance 僅提供近約 30 天。
+
+        Returns:
+            list: {symbol, sumOpenInterest, sumOpenInterestValue, timestamp}
+        """
+        return self._futures_data_get("openInterestHist", {
+            "symbol": self._modify_symbol_name(symbol), "period": period, "limit": min(500, limit)})
+
+    def get_long_short_ratio(self, symbol: str, kind: str = "global",
+                             period: str = "1d", limit: int = 500) -> List[Dict[str, Any]]:
+        """
+        多空帳戶/部位比。kind: 'global'(全市場帳戶) / 'top_account'(大戶帳戶) /
+        'top_position'(大戶部位) / 'taker'(主動買賣量比)。僅近約 30 天。
+
+        Returns:
+            list: {symbol, longShortRatio/longAccount/shortAccount..., timestamp}
+        """
+        path = {"global": "globalLongShortAccountRatio",
+                "top_account": "topLongShortAccountRatio",
+                "top_position": "topLongShortPositionRatio",
+                "taker": "takerlongshortRatio"}[kind]
+        return self._futures_data_get(path, {
+            "symbol": self._modify_symbol_name(symbol), "period": period, "limit": min(500, limit)})
+
+    def get_perpetual_symbols(self, quote_asset: str = "USDT") -> List[str]:
+        """
+        獲取目前所有「正在交易中」的永續合約交易對
+
+        Args:
+            quote_asset (str): 計價幣別，預設 "USDT"
+
+        Returns:
+            list: 交易對名稱列表（例如 ["BTCUSDT", "ETHUSDT", ...]）
+
+        Note:
+            - 只回傳 contractType == PERPETUAL 且 status == TRADING 的交易對
+            - 用於 universe 構建，避免抓到已下市或交割合約
+        """
+        info = self.client.futures_exchange_info()
+        return [
+            s["symbol"]
+            for s in info["symbols"]
+            if s.get("contractType") == "PERPETUAL"
+            and s.get("status") == "TRADING"
+            and s.get("quoteAsset") == quote_asset
+        ]
+
     def get_max_leverage(self, symbol: str) -> int:
         """
         查詢交易對的最大允許槓桿
