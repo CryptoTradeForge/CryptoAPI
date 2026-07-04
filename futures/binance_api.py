@@ -526,34 +526,16 @@ class BinanceFutures(AbstractFuturesAPI):
             quantity = result["details"]["quantity"]
             price = result["details"]["price"]
             
-            # 設定槓桿（處理帳戶限制）
-            leverage_set = False
-            actual_leverage = leverage
-            for try_lev in [leverage, 5, 3, 2, 1]:
-                try:
-                    self.client.futures_change_leverage(symbol=symbol, leverage=try_lev)
-                    if try_lev != leverage:
-                        self.logger.warning(f"⚠️ {symbol} 槓桿限制，降至 {try_lev}x（原目標 {leverage}x）")
-                    actual_leverage = try_lev
-                    leverage_set = True
-                    break
-                except Exception as e:
-                    if '-4424' in str(e) or 'leverage' in str(e).lower():
-                        continue  # 嘗試更低槓桿
-                    else:
-                        raise  # 其他錯誤直接拋出
-
-            if not leverage_set:
-                raise Exception(f"無法為 {symbol} 設定任何槓桿（嘗試了 {leverage}x 到 1x）")
-
-            # 重新計算 amount 基於實際槓桿（如果實際槓桿不同）
-            if actual_leverage != leverage:
-                # 根據實際槓桿調整名義價值
-                amount = (amount / leverage) * actual_leverage
-                quantity = amount / float(price)
-                price_precision, quantity_precision = self._get_symbol_precision(symbol)
-                result["details"]["quantity"] = self._truncate_to_precision(quantity, quantity_precision)
-                quantity = result["details"]["quantity"]
+            # 設定槓桿：失敗直接 return error，不 escalate、不放大名目、不代替上層決策。
+            # 幣安只限「最大」槓桿；開低槓桿理論上設得成，設不成幾乎是「逐倉有持倉不能『降』槓桿」。
+            # 要不要「降槓桿重開」是使用此 lib 的開發邏輯（策略層）的事、不是 lib 該猜 → 回報 error 交上層。
+            try:
+                self.client.futures_change_leverage(symbol=symbol, leverage=leverage)
+            except Exception as e:
+                self.logger.error(f"{symbol} 設定槓桿 {leverage}x 失敗，未下單: {e}")
+                result["error_message"] = f"設定槓桿失敗（未下單，交上層處理）: {e}"
+                return result
+            result["details"]["leverage"] = leverage
 
             # 設定保證金模式（僅在首次交易時）
             self._set_isolated_margin(symbol)
@@ -590,7 +572,7 @@ class BinanceFutures(AbstractFuturesAPI):
             result["raw_response"] = info
 
             # 更新實際設定的槓桿到結果
-            result["details"]["leverage"] = actual_leverage
+            result["details"]["leverage"] = leverage
 
             # 設置止損止盈
             sl_tp_result = self.set_stop_loss_take_profit(symbol, side, stop_loss_price, take_profit_price)
@@ -680,34 +662,14 @@ class BinanceFutures(AbstractFuturesAPI):
             quantity = result["details"]["quantity"]
             price = result["details"]["price"]
             
-            # Set leverage（處理帳戶限制）
-            leverage_set = False
-            actual_leverage = leverage
-            for try_lev in [leverage, 5, 3, 2, 1]:
-                try:
-                    self.client.futures_change_leverage(symbol=symbol, leverage=try_lev)
-                    if try_lev != leverage:
-                        self.logger.warning(f"⚠️ {symbol} 槓桿限制，降至 {try_lev}x（原目標 {leverage}x）")
-                    actual_leverage = try_lev
-                    leverage_set = True
-                    break
-                except Exception as e:
-                    if '-4424' in str(e) or 'leverage' in str(e).lower():
-                        continue  # 嘗試更低槓桿
-                    else:
-                        raise  # 其他錯誤直接拋出
-
-            if not leverage_set:
-                raise Exception(f"無法為 {symbol} 設定任何槓桿（嘗試了 {leverage}x 到 1x）")
-
-            # 重新計算 amount 基於實際槓桿（如果實際槓桿不同）
-            if actual_leverage != leverage:
-                # 根據實際槓桿調整名義價值
-                amount = (amount / leverage) * actual_leverage
-                quantity = amount / float(price)
-                price_precision, quantity_precision = self._get_symbol_precision(symbol)
-                result["details"]["quantity"] = self._truncate_to_precision(quantity, quantity_precision)
-                quantity = result["details"]["quantity"]
+            # 設定槓桿：失敗直接 return error，不 escalate、不放大名目、不代替上層決策（同 place_market_order）。
+            try:
+                self.client.futures_change_leverage(symbol=symbol, leverage=leverage)
+            except Exception as e:
+                self.logger.error(f"{symbol} 設定槓桿 {leverage}x 失敗，未下單: {e}")
+                result["error_message"] = f"設定槓桿失敗（未下單，交上層處理）: {e}"
+                return result
+            result["details"]["leverage"] = leverage
 
             # 設定保證金模式（僅在首次交易時）
             self._set_isolated_margin(symbol)
@@ -726,7 +688,7 @@ class BinanceFutures(AbstractFuturesAPI):
 
             result["orderId"] = info.get("orderId")
             # 更新實際設定的槓桿到結果
-            result["details"]["leverage"] = actual_leverage
+            result["details"]["leverage"] = leverage
             result["success"] = True
             return result
             
